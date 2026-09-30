@@ -1,0 +1,21 @@
+{
+  "connections": {},
+  "id": "2vdzYfv9G7szWdEb",
+  "name": "Connector Demo Fixture: Alpha",
+  "nodes": [
+    {
+      "id": "fixture-1",
+      "name": "Fixture start",
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ],
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1
+    }
+  ],
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
