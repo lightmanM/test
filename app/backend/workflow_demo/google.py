@@ -78,6 +78,33 @@ def spreadsheet_url(http: httpx.Client, access_token: str, spreadsheet_id: str) 
         raise GoogleError("Google Sheets returned an unexpected response") from None
 
 
+def replace_uptime_sites(
+    http: httpx.Client, access_token: str, spreadsheet_id: str, sites: list[str]
+) -> None:
+    """Replace the ``Sites`` rows below the header with ``sites`` (Status starts blank, i.e. UP)."""
+    values = f"{SHEETS_API}/{quote(spreadsheet_id, safe='')}/values"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    _sheets_call(http, "POST", f"{values}/{quote('Sites!A2:B', safe='')}:clear", headers=headers, json={})
+    if sites:
+        _sheets_call(
+            http,
+            "PUT",
+            f"{values}/{quote('Sites!A2', safe='')}",
+            headers=headers,
+            params={"valueInputOption": "RAW"},
+            json={"values": [[site] for site in sites]},
+        )
+
+
+def _sheets_call(http: httpx.Client, method: str, url: str, **kwargs: Any) -> None:
+    try:
+        resp = http.request(method, url, timeout=30, **kwargs)
+    except httpx.HTTPError as exc:
+        raise GoogleError(f"Google Sheets is unreachable: {exc.__class__.__name__}") from None
+    if resp.status_code >= 400:
+        raise GoogleError(f"Google Sheets error {resp.status_code}: {_message(resp)}")
+
+
 def delete_file(http: httpx.Client, access_token: str, file_id: str) -> None:
     """Best effort: remove a file the demo created (drive.file scope covers it)."""
     with contextlib.suppress(httpx.HTTPError):

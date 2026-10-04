@@ -143,6 +143,7 @@ def test_deploy_uptime(adapter):
         "webhook_path": path,
         "spreadsheet_id": "sheet-1",
         "spreadsheet_url": "https://docs.google.com/s/sheet-1",
+        "sites_written": UPTIME_SETTINGS["sites"],
     }
 
 
@@ -262,11 +263,18 @@ def test_redeploy_reuses_the_spreadsheet(adapter):
         connections={},
         refs={},
         credentials=Creds(),
-        previous_refs={"spreadsheet_id": "old", "workflow_id": "wf-1"},
+        # The form's list is unchanged since it was last written: the Sites tab (and the user's edits
+        # in it) stays as it is — an unmocked Sheets write would fail this test.
+        previous_refs={
+            "spreadsheet_id": "old",
+            "workflow_id": "wf-1",
+            "sites_written": UPTIME_SETTINGS["sites"],
+        },
     )
     result = adapter.deploy(ctx)
     assert not new_sheet.called
     assert result.refs["spreadsheet_id"] == "old" and result.refs["spreadsheet_url"] == "https://s/old"
+    assert result.refs["sites_written"] == UPTIME_SETTINGS["sites"]
     assert "old" in json.dumps(json.loads(created.calls.last.request.content))
 
     # The user deleted it: a new one is made.
@@ -502,3 +510,62 @@ def test_delete_gives_up_when_the_workflow_stays_published():
     respx.post(f"{API}/workflows/wf-1/unpublish").mock(return_value=httpx.Response(200))
     with pytest.raises(N8nError, match="409"):
         client.delete_workflow("wf-1")
+
+
+def redeploy_context(previous_refs):
+    return DeployContext(
+        username="alice",
+        workflow=CATALOG.workflow("uptime-monitor"),
+        deployment_id=7,
+        settings=UPTIME_SETTINGS,
+        connections={},
+        refs={},
+        credentials=Creds(),
+        previous_refs={"spreadsheet_id": "old", "workflow_id": "wf-1", **previous_refs},
+    )
+
+
+def mock_sheet_rewrite():
+    respx.get(f"{SHEETS}/old").mock(
+        return_value=httpx.Response(200, json={"spreadsheetId": "old", "spreadsheetUrl": "https://s/old"})
+    )
+    cleared = respx.post(url__regex=rf"{SHEETS}/old/values/Sites(!|%21)A2(:|%3A)B:clear").mock(
+        return_value=httpx.Response(200, json={})
+    )
+    written = respx.put(url__regex=rf"{SHEETS}/old/values/Sites(!|%21)A2").mock(
+        return_value=httpx.Response(200, json={})
+    )
+    return cleared, written
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "previous",
+    [
+        {"sites_written": ["https://example.com", "https://x.com/home"]},  # the tester changed the list
+        {},  # deployed before the list was recorded: rewrite once
+    ],
+)
+def test_redeploy_writes_a_changed_site_list_into_the_spreadsheet(adapter, previous):
+    # Bug report: after changing "Websites to monitor" and redeploying, Run still checked the old sites.
+    mock_credentials()
+    respx.post(f"{API}/workflows").mock(return_value=httpx.Response(200, json={"id": "wf-2"}))
+    respx.post(f"{API}/workflows/wf-2/publish").mock(return_value=httpx.Response(200, json={}))
+    cleared, written = mock_sheet_rewrite()
+    result = adapter.deploy(redeploy_context(previous))
+    assert cleared.called
+    assert json.loads(written.calls.last.request.content)["values"] == [[s] for s in UPTIME_SETTINGS["sites"]]
+    assert written.calls.last.request.url.params["valueInputOption"] == "RAW"
+    assert result.refs["sites_written"] == UPTIME_SETTINGS["sites"]
+
+
+@respx.mock
+def test_new_spreadsheet_records_the_sites_it_was_seeded_with(adapter):
+    mock_credentials()
+    respx.post(SHEETS).mock(
+        return_value=httpx.Response(200, json={"spreadsheetId": "s", "spreadsheetUrl": "u"})
+    )
+    respx.post(f"{API}/workflows").mock(return_value=httpx.Response(200, json={"id": "wf-1"}))
+    respx.post(f"{API}/workflows/wf-1/publish").mock(return_value=httpx.Response(200, json={}))
+    result = adapter.deploy(context("uptime-monitor", UPTIME_SETTINGS))
+    assert result.refs["sites_written"] == UPTIME_SETTINGS["sites"]

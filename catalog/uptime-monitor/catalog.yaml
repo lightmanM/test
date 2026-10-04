@@ -24,7 +24,8 @@ settings:
       - https://httpbin.org/status/503
     help: >-
       Fills the new spreadsheet on the first deploy (the second default URL always fails, so you'll
-      see an alert). Afterwards edit the spreadsheet's Sites tab; redeploys keep using it.
+      see an alert). Changing this list and redeploying replaces the spreadsheet's Sites tab; edits
+      made in the spreadsheet stay when you redeploy without changing the list.
 try_it: |
   Click **Run now**. Within a minute you get a Slack alert for the failing site and new rows in
   the spreadsheet's Log tab. Edit the Sites tab to change what's monitored. The monitor also runs
