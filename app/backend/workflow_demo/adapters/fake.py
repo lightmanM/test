@@ -32,7 +32,7 @@ class FakeAdapter:
         self.platform = platform
         self._popup_url = popup_url_builder
 
-    def check_available(self) -> Availability:
+    def check_available(self, entry=None) -> Availability:
         return Availability(True)
 
     def deploy(self, ctx: DeployContext) -> DeployResult:

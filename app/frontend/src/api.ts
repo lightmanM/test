@@ -52,6 +52,7 @@ export interface Deployment {
   deployed_at: string | null
   expires_at: string | null
   popup_url: string | null
+  links: { label: string; url: string }[]
   updated_at: string
   events: DeploymentEvent[]
 }

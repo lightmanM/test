@@ -31,6 +31,7 @@ def test_defaults_applied_and_strings_trimmed():
         ({"channel": "C0123ABCD", "count": "3"}, "count"),
         ({"channel": "C0123ABCD", "count": True}, "count"),
         ({"channel": "C0123ABCD", "extra": 1}, "extra"),
+        ({"channel": "C0123ABCD", "name": "={{ $env.SECRET }}"}, "name"),
     ],
 )
 def test_invalid_values(given, field):

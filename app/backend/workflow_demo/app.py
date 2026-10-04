@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from workflow_demo import paths
-from workflow_demo.adapters.registry import AdapterRegistry, fake_registry
+from workflow_demo.adapters.registry import AdapterRegistry, fake_registry, real_registry
 from workflow_demo.api import admin, auth, connections, deployments, user_steps, workflows
 from workflow_demo.catalog.loader import load_catalog
 from workflow_demo.config import Settings, get_settings
@@ -48,8 +48,11 @@ def build_services(
         )
     if settings.data_encryption_key:
         svc.secret_box = SecretBox(settings.data_encryption_key.get_secret_value())
-    if registry is None and settings.fake_platforms:
-        svc.registry = fake_registry(lambda state: f"{settings.base_url}/fake/make-popup?state={state}")
+    if registry is None:
+        if settings.fake_platforms:
+            svc.registry = fake_registry(lambda state: f"{settings.base_url}/fake/make-popup?state={state}")
+        else:
+            svc.registry = real_registry(settings, svc.http)
     run = lambda job_id: svc_deployments.run_job(svc, job_id)  # noqa: E731
     svc.runner = (runner_factory or ThreadJobRunner)(run)
     return svc

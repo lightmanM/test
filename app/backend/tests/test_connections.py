@@ -336,3 +336,38 @@ def test_health_reports_connection_modes(live, client):
     svc, live_client = live
     assert live_client.get("/api/health").json()["nango_enabled"] is True
     assert client.get("/api/health").json()["nango_enabled"] is False
+
+
+@respx.mock
+def test_user_credentials_for_deploy_jobs(live):
+    from workflow_demo.adapters.base import AdapterError
+    from workflow_demo.db import User
+    from workflow_demo.services.connections import UserCredentials
+
+    svc, client = live
+    route = respx.get(f"{NANGO}/connections/g-1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                **nango_connection("g-1", "google", "alice", raw={"scope": "sheets"}),
+                "credentials": {"access_token": "ya29", "refresh_token": "1//r", "raw": {"scope": "sheets"}},
+            },
+        )
+    )
+    respx.get("https://openidconnect.googleapis.com/v1/userinfo").mock(return_value=httpx.Response(401))
+    client.post("/api/connections/google/complete", json={"connection_id": "g-1"})
+    client.put("/api/connections/meegle_mcp_token/secret", json={"value": "m-AB-1234-abcd"})
+    client.post("/api/connections/slack/fake")  # fake mode is on in this fixture
+
+    with svc.db.session() as db:
+        creds = UserCredentials(svc, db.query(User).one())
+        tokens = creds.oauth_tokens("google", with_refresh_token=True)
+        assert (tokens.access_token, tokens.refresh_token, tokens.scope) == ("ya29", "1//r", "sheets")
+        assert route.calls.last.request.url.params["refresh_token"] == "true"
+        assert creds.oauth_tokens("google").refresh_token is None
+        assert "refresh_token" not in route.calls.last.request.url.params
+        assert creds.secret_value("meegle_mcp_token") == "m-AB-1234-abcd"
+        with pytest.raises(AdapterError, match="demo data"):
+            creds.oauth_tokens("slack")
+        with pytest.raises(AdapterError, match="Connect Meegle user key first"):
+            creds.secret_value("meegle_user_key")

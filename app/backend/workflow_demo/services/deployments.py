@@ -30,6 +30,7 @@ from workflow_demo.adapters.base import (
 )
 from workflow_demo.catalog.models import ConnectorKind, WorkflowEntry
 from workflow_demo.db import Connection, Deployment, DeploymentEvent, Job, User, utcnow
+from workflow_demo.services.connections import UserCredentials
 from workflow_demo.services.container import AppServices
 from workflow_demo.services.settings_schema import validate_settings
 from workflow_demo.services.states import BUSY, Status, check_transition
@@ -72,7 +73,7 @@ def workflow_entry(svc: AppServices, workflow_id: str) -> WorkflowEntry:
 
 def availability(svc: AppServices, entry: WorkflowEntry) -> Availability:
     try:
-        return svc.registry.get(entry.platform).check_available()
+        return svc.registry.get(entry.platform).check_available(entry)
     except AdapterError as exc:
         return Availability(False, str(exc))
 
@@ -156,6 +157,7 @@ def build_context(
         callback_url=f"{svc.settings.base_url}/make/callback?state={user_step_state}"
         if user_step_state
         else None,
+        credentials=UserCredentials(svc, dep.user),
     )
 
 

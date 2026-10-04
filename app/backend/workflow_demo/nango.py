@@ -35,6 +35,10 @@ class NangoConnection:
         return self.credentials.get("access_token")
 
     @property
+    def refresh_token(self) -> str | None:
+        return self.credentials.get("refresh_token")
+
+    @property
     def raw(self) -> dict[str, Any]:
         return self.credentials.get("raw") or {}
 
@@ -79,13 +83,21 @@ class NangoClient:
             raise NangoError("Nango returned an unexpected connect session") from None
 
     def get_connection(
-        self, connection_id: str, integration: str, *, force_refresh: bool = False
+        self,
+        connection_id: str,
+        integration: str,
+        *,
+        force_refresh: bool = False,
+        include_refresh_token: bool = False,
     ) -> NangoConnection:
         """Read a connection. Nango refreshes an expired access token itself; ``force_refresh``
-        refreshes regardless. The refresh token is never requested."""
+        refreshes regardless. The refresh token is returned only with ``include_refresh_token``
+        (needed when another platform must refresh the token itself, e.g. n8n)."""
         params = {"provider_config_key": integration}
         if force_refresh:
             params["force_refresh"] = "true"
+        if include_refresh_token:
+            params["refresh_token"] = "true"
         data = self._request("GET", _connection_path(connection_id), params=params)
         try:
             return NangoConnection(

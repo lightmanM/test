@@ -107,6 +107,18 @@ export function DeployPanel({
       <div className="flex flex-wrap items-center gap-3">
         <StatusBadge status={status} />
         {status === 'active' && <span className="text-xs text-slate-500">{timeLeft(dep?.expires_at ?? null)}</span>}
+        {status === 'active' &&
+          dep?.links.map((link) => (
+            <a
+              key={link.url}
+              href={link.url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sm font-medium text-indigo-600 hover:underline"
+            >
+              {link.label} ↗
+            </a>
+          ))}
       </div>
       {dep?.error && <ErrorNote error={dep.error} />}
       {status === 'awaiting_user' && dep?.popup_url && (
