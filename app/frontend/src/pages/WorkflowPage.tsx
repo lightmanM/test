@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { api, BUSY, type WorkflowDetail } from '../api'
+import { api, BUSY, isTransitional, type WorkflowDetail } from '../api'
 import { ConnectStep } from '../components/ConnectStep'
 import { DeployPanel } from '../components/DeployPanel'
 import { RunsPanel } from '../components/RunsPanel'
@@ -14,10 +14,7 @@ export function WorkflowPage({ fakeMode }: { fakeMode: boolean }) {
   const workflow = useQuery({
     queryKey: ['workflow', id],
     queryFn: () => api.workflow(id),
-    refetchInterval: (q) => {
-      const status = q.state.data?.deployment?.status
-      return status && (BUSY.includes(status) || status === 'awaiting_user') ? 1500 : false
-    },
+    refetchInterval: (q) => (isTransitional(q.state.data?.deployment?.status) ? 1500 : false),
   })
   if (workflow.error) return <ErrorNote error={workflow.error} />
   if (!workflow.data) return <p className="text-sm text-slate-500">Loading…</p>
@@ -35,7 +32,6 @@ function WorkflowView({ workflow, fakeMode }: { workflow: WorkflowDetail; fakeMo
   const savedKey = JSON.stringify(workflow.deployment?.settings ?? null)
   useEffect(() => setValues(initial()), [savedKey])
 
-  const types = Object.fromEntries(workflow.settings.map((s) => [s.key, s.type]))
   const status = workflow.deployment?.status
   const busy = !!status && BUSY.includes(status)
 
@@ -66,7 +62,7 @@ function WorkflowView({ workflow, fakeMode }: { workflow: WorkflowDetail; fakeMo
       <Section step={3} title={workflow.shared_deployment ? 'Activate' : 'Deploy'}>
         <DeployPanel
           workflow={workflow}
-          settings={() => settingsFromForm(values, types)}
+          settings={() => settingsFromForm(values, workflow.settings)}
           onFieldErrors={setFieldErrors}
         />
       </Section>

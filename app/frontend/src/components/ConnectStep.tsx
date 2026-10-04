@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { api, type ConnectorStatus, type WorkflowDetail } from '../api'
+import { api, type ConnectorStatus, refreshAll, type WorkflowDetail } from '../api'
 import { Button, ErrorNote } from './ui'
 
 export function ConnectStep({ workflow, fakeMode }: { workflow: WorkflowDetail; fakeMode: boolean }) {
@@ -16,13 +16,9 @@ export function ConnectStep({ workflow, fakeMode }: { workflow: WorkflowDetail; 
 function ConnectorRow({ connector, fakeMode }: { connector: ConnectorStatus; fakeMode: boolean }) {
   const queryClient = useQueryClient()
   const [error, setError] = useState<unknown>(null)
-  const refresh = () => queryClient.invalidateQueries()
-  const connect = useMutation({
-    mutationFn: () => api.fakeConnect(connector.id),
-    onSuccess: refresh,
-    onError: setError,
-  })
-  const disconnect = useMutation({ mutationFn: () => api.disconnect(connector.id), onSuccess: refresh, onError: setError })
+  const options = { onMutate: () => setError(null), onSuccess: () => refreshAll(queryClient), onError: setError }
+  const connect = useMutation({ mutationFn: () => api.fakeConnect(connector.id), ...options })
+  const disconnect = useMutation({ mutationFn: () => api.disconnect(connector.id), ...options })
 
   return (
     <li className="flex flex-wrap items-start justify-between gap-3 py-3" data-testid={`connector-${connector.id}`}>

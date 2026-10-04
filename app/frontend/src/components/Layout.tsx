@@ -7,9 +7,14 @@ export function Layout({ username, children }: { username?: string; children: Re
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const signOut = async () => {
-    await api.logout()
-    queryClient.clear()
-    navigate('/login')
+    try {
+      await api.logout()
+    } catch {
+      // The cookie may already be gone; sign out locally either way.
+    } finally {
+      queryClient.clear()
+      navigate('/login')
+    }
   }
   return (
     <div className="min-h-screen">

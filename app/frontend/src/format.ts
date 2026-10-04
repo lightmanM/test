@@ -33,13 +33,17 @@ export function inlineMarkdown(text: string): Segment[] {
   return out
 }
 
-export function settingsFromForm(
-  values: Record<string, string>,
-  types: Record<string, string>,
-): Record<string, unknown> {
+export interface SettingShape {
+  key: string
+  type: string
+  options: unknown[] | null
+}
+
+export function settingsFromForm(values: Record<string, string>, settings: SettingShape[]): Record<string, unknown> {
   const out: Record<string, unknown> = {}
-  for (const [key, raw] of Object.entries(values)) {
-    const type = types[key]
+  for (const setting of settings) {
+    const raw = values[setting.key] ?? ''
+    const { key, type } = setting
     if (type === 'url_list') {
       out[key] = raw
         .split('\n')
@@ -48,7 +52,9 @@ export function settingsFromForm(
     } else if (type === 'number') {
       out[key] = raw === '' ? null : Number(raw)
     } else if (type === 'select') {
-      out[key] = /^-?\d+(\.\d+)?$/.test(raw) ? Number(raw) : raw
+      // Send the option itself so its type (number or string) matches the catalog.
+      const option = (setting.options ?? []).find((o) => String(o) === raw)
+      out[key] = option === undefined ? raw : option
     } else {
       out[key] = raw
     }

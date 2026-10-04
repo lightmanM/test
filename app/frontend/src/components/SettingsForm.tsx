@@ -32,6 +32,11 @@ export function SettingsForm({
               onChange={(e) => onChange(s.key, e.target.value)}
               className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2"
             >
+              {!(s.options ?? []).some((o) => String(o) === (values[s.key] ?? '')) && (
+                <option value={values[s.key] ?? ''} disabled>
+                  Choose…
+                </option>
+              )}
               {(s.options ?? []).map((o) => (
                 <option key={String(o)} value={String(o)}>
                   {String(o)}

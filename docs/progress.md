@@ -13,7 +13,7 @@ Living document. Update at the end of every work session and every PR.
 |---|---|---|---|
 | P0 Foundations | [#1](https://github.com/lightmanM/test/pull/1) | merged | repo layout, tooling, CI, catalog + fixed templates, SDK compile, setup guide |
 | P1a Backend core | [#2](https://github.com/lightmanM/test/pull/2) | merged | auth, DB, catalog API, state machine, fake adapters |
-| P1b Frontend | (pending) | in review | sign-in, catalog, workflow page, admin shell |
+| P1b Frontend | [#3](https://github.com/lightmanM/test/pull/3) | in review | sign-in, catalog, workflow page, admin shell |
 | P2 Connections | — | not started | Nango connect + manual secrets |
 | P3 n8n | — | not started | adapter, 3 transforms, shared credentials, Run now, results |
 | P4 Modal services | — | not started | reader + bot on Modal, bot patches, "Activate for me" |
@@ -60,6 +60,9 @@ build (`app/frontend/dist`, SPA fallback; override with `WORKFLOW_DEMO_FRONTEND_
 click, navigated when the job returns `popup_url`, closes itself and `postMessage`s back. Connect buttons use the
 fake-mode endpoint until P2. Playwright E2E (`npm run e2e`) starts the backend in fake mode on port 8765; locally
 set `PW_CHROMIUM_PATH=/opt/pw-browsers/chromium` and `PYTHON=.venv/bin/python`.
+Review fixes: popup closed if the deploy ends without reaching Make; select inputs keep option types and show
+"Choose…" for invalid values; non-401 errors show a retry; connect errors clear; safe sign-out; delete guarded;
+catch-all route answers unknown non-GET/API paths with 404; `safe_static_file` tested; shared `isTransitional`.
 - [x] Sign-in, catalog, workflow page (connect / settings / deploy / try), admin shell
 - [x] Playwright click-through in fake mode
 

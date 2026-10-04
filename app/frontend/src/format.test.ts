@@ -27,10 +27,15 @@ describe('settings form conversion', () => {
   it('converts per type', () => {
     expect(
       settingsFromForm(
-        { sites: 'https://a.dev\n\n https://b.dev ', window: '24', model: 'gpt-4o-mini', channel: 'C0123ABCD' },
-        { sites: 'url_list', window: 'select', model: 'select', channel: 'slack_channel' },
+        { sites: 'https://a.dev\n\n https://b.dev ', window: '24', version: '2.0', channel: 'C0123ABCD' },
+        [
+          { key: 'sites', type: 'url_list', options: null },
+          { key: 'window', type: 'select', options: [24, 720] },
+          { key: 'version', type: 'select', options: ['1.5', '2.0'] },
+          { key: 'channel', type: 'slack_channel', options: null },
+        ],
       ),
-    ).toEqual({ sites: ['https://a.dev', 'https://b.dev'], window: 24, model: 'gpt-4o-mini', channel: 'C0123ABCD' })
+    ).toEqual({ sites: ['https://a.dev', 'https://b.dev'], window: 24, version: '2.0', channel: 'C0123ABCD' })
     expect(formValue(['x', 'y'], 'url_list')).toBe('x\ny')
     expect(formValue(undefined, 'string')).toBe('')
   })

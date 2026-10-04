@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -71,7 +71,23 @@ def create_app(settings: Settings | None = None, services: AppServices | None = 
     return app
 
 
-SERVER_PREFIXES = ("api/", "make/", "fake/")
+SERVER_PATHS = ("api", "make", "fake")  # never answered with the frontend
+
+
+def is_server_path(path: str) -> bool:
+    first = path.strip("/").split("/", 1)[0]
+    return first in SERVER_PATHS
+
+
+def safe_static_file(root: Path, path: str) -> Path | None:
+    """The file under ``root`` that ``path`` names, or None (missing, a directory, or outside root)."""
+    if not path:
+        return None
+    root = root.resolve()
+    candidate = (root / path).resolve()
+    if candidate.is_file() and candidate.is_relative_to(root):
+        return candidate
+    return None
 
 
 def mount_frontend(app: FastAPI, dist: Path) -> None:
@@ -82,13 +98,13 @@ def mount_frontend(app: FastAPI, dist: Path) -> None:
         return
     if (dist / "assets").is_dir():
         app.mount("/assets", StaticFiles(directory=dist / "assets"), name="assets")
-    root = dist.resolve()
 
-    @app.get("/{path:path}", include_in_schema=False)
-    def spa(path: str) -> FileResponse:
-        if path.startswith(SERVER_PREFIXES):
+    # Registered last and for every method, so unknown API paths get 404 (not 405) and only GETs
+    # outside the server paths fall back to the app.
+    @app.api_route(
+        "/{path:path}", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False
+    )
+    def spa(path: str, request: Request) -> FileResponse:
+        if request.method not in ("GET", "HEAD") or is_server_path(path):
             raise HTTPException(404)
-        candidate = (dist / path).resolve()
-        if path and candidate.is_file() and candidate.is_relative_to(root):
-            return FileResponse(candidate)
-        return FileResponse(index)
+        return FileResponse(safe_static_file(dist, path) or index)

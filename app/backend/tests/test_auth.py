@@ -83,5 +83,23 @@ def test_frontend_is_served_with_spa_fallback(tmp_path, make_settings, monkeypat
     assert client.get("/workflows/uptime-monitor").text == "<div id=root></div>"
     assert client.get("/assets/app.js").text == "console.log(1)"
     assert client.get("/favicon.svg").text == "<svg/>"
-    assert client.get("/../secret").status_code in (200, 404)  # never escapes dist
     assert client.get("/api/nope").status_code == 404
+    assert client.post("/api/nope").status_code == 404
+    assert client.get("/api").status_code == 404
+    assert client.post("/workflows/x").status_code == 404
+
+
+def test_safe_static_file_stays_inside_root(tmp_path):
+    from workflow_demo.app import is_server_path, safe_static_file
+
+    root = tmp_path / "dist"
+    (root / "assets").mkdir(parents=True)
+    (root / "assets" / "a.js").write_text("ok")
+    (tmp_path / "secret.txt").write_text("TOP SECRET")
+    assert safe_static_file(root, "assets/a.js") == (root / "assets" / "a.js").resolve()
+    assert safe_static_file(root, "../secret.txt") is None
+    assert safe_static_file(root, "assets/../../secret.txt") is None
+    assert safe_static_file(root, "assets") is None
+    assert safe_static_file(root, "") is None
+    assert is_server_path("api") and is_server_path("api/x") and is_server_path("/make/callback")
+    assert not is_server_path("apis") and not is_server_path("workflows/api")

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { api, BUSY, type WorkflowSummary } from '../api'
+import { api, isTransitional, type WorkflowSummary } from '../api'
 import { Card, ErrorNote, PlatformBadge, StatusBadge } from '../components/ui'
 import { timeLeft } from '../format'
 
@@ -8,10 +8,7 @@ export function CatalogPage() {
   const workflows = useQuery({
     queryKey: ['workflows'],
     queryFn: api.workflows,
-    refetchInterval: (q) =>
-      q.state.data?.some((w) => w.deployment && (BUSY.includes(w.deployment.status) || w.deployment.status === 'awaiting_user'))
-        ? 2000
-        : false,
+    refetchInterval: (q) => (q.state.data?.some((w) => isTransitional(w.deployment?.status)) ? 2000 : false),
   })
   return (
     <div>

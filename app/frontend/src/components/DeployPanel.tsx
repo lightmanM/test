@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
-import { api, ApiError, BUSY, type WorkflowDetail } from '../api'
+import { api, ApiError, BUSY, refreshAll, type WorkflowDetail } from '../api'
 import { shortTime, timeLeft } from '../format'
 import { Button, ErrorNote, StatusBadge } from './ui'
 
@@ -19,6 +19,7 @@ export function DeployPanel({
   const queryClient = useQueryClient()
   const [error, setError] = useState<unknown>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [removing, setRemoving] = useState(false)
   const popup = useRef<Window | null>(null)
   const popupNavigated = useRef(false)
   const dep = workflow.deployment
@@ -26,7 +27,7 @@ export function DeployPanel({
   const busy = !!status && BUSY.includes(status)
   const deployed = !!status && status !== 'stopped'
   const shared = workflow.shared_deployment
-  const refresh = () => queryClient.invalidateQueries()
+  const refresh = () => refreshAll(queryClient)
 
   // Make's popup: opened on click (so browsers allow it), pointed at the URL once the deploy job has it.
   useEffect(() => {
@@ -37,13 +38,28 @@ export function DeployPanel({
     }
   }, [status, dep?.popup_url])
 
+  // Close a popup that never reached Make (the deploy failed or finished without it).
+  useEffect(() => {
+    const win = popup.current
+    if (win && !win.closed && !popupNavigated.current && status && status !== 'awaiting_user' && !BUSY.includes(status)) {
+      win.close()
+    }
+  }, [status])
+
+  useEffect(
+    () => () => {
+      if (popup.current && !popup.current.closed && !popupNavigated.current) popup.current.close()
+    },
+    [],
+  )
+
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
-      if (event.origin === window.location.origin && event.data?.type === 'wd:user-step') refresh()
+      if (event.origin === window.location.origin && event.data?.type === 'wd:user-step') refreshAll(queryClient)
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  })
+  }, [queryClient])
 
   const deploy = async () => {
     setError(null)
@@ -68,11 +84,13 @@ export function DeployPanel({
 
   const remove = async () => {
     setError(null)
+    setRemoving(true)
     try {
       await api.undeploy(workflow.id)
     } catch (err) {
       setError(err)
     } finally {
+      setRemoving(false)
       refresh()
     }
   }
@@ -112,7 +130,7 @@ export function DeployPanel({
           {submitting ? 'Starting…' : deployLabel}
         </Button>
         {deployed && (
-          <Button variant="danger" onClick={remove} disabled={busy || submitting}>
+          <Button variant="danger" onClick={remove} disabled={busy || submitting || removing}>
             {shared ? 'Deactivate' : 'Delete'}
           </Button>
         )}

@@ -99,6 +99,11 @@ export interface AdminOverview {
   }[]
 }
 
+/** Refetch everything after a change that affects several views (connections, deployments). */
+export function refreshAll(queryClient: { invalidateQueries: () => Promise<unknown> }) {
+  return queryClient.invalidateQueries()
+}
+
 export class ApiError extends Error {
   status: number
   fields: Record<string, string>
@@ -152,3 +157,8 @@ export const api = {
 }
 
 export const BUSY: DeploymentStatus[] = ['deploying', 'redeploying', 'stopping']
+
+/** Statuses that change on their own (a job is running or the user is in a platform popup): poll. */
+export function isTransitional(status: DeploymentStatus | null | undefined): boolean {
+  return !!status && (BUSY.includes(status) || status === 'awaiting_user')
+}
