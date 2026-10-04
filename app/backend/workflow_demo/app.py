@@ -16,7 +16,9 @@ from workflow_demo.adapters.registry import AdapterRegistry, fake_registry
 from workflow_demo.api import admin, auth, connections, deployments, user_steps, workflows
 from workflow_demo.catalog.loader import load_catalog
 from workflow_demo.config import Settings, get_settings
+from workflow_demo.crypto import SecretBox
 from workflow_demo.db import Database
+from workflow_demo.nango import NangoClient
 from workflow_demo.security import Signer
 from workflow_demo.services import deployments as svc_deployments
 from workflow_demo.services.container import AppServices
@@ -39,6 +41,13 @@ def build_services(
         registry=registry or AdapterRegistry({}),
         signer=Signer(settings.session_secret.get_secret_value()),
     )
+    # Empty values (e.g. `NANGO_SECRET_KEY=` in .env) leave the feature off.
+    if settings.nango_secret_key:
+        svc.nango = NangoClient(
+            settings.nango_secret_key.get_secret_value(), settings.nango_host, http=svc.http
+        )
+    if settings.data_encryption_key:
+        svc.secret_box = SecretBox(settings.data_encryption_key.get_secret_value())
     if registry is None and settings.fake_platforms:
         svc.registry = fake_registry(lambda state: f"{settings.base_url}/fake/make-popup?state={state}")
     run = lambda job_id: svc_deployments.run_job(svc, job_id)  # noqa: E731
@@ -55,6 +64,7 @@ def create_app(settings: Settings | None = None, services: AppServices | None = 
         if svc.settings.recover_jobs_on_startup:
             svc_deployments.recover_stale_jobs(svc, older_than=timedelta(0))
         yield
+        svc.http.close()
 
     app = FastAPI(
         title="Workflow Deploy Demo", docs_url="/api/docs", openapi_url="/api/openapi.json", lifespan=lifespan
@@ -65,7 +75,11 @@ def create_app(settings: Settings | None = None, services: AppServices | None = 
 
     @app.get("/api/health")
     def health() -> dict:
-        return {"status": "ok", "fake_platforms": svc.settings.fake_platforms}
+        return {
+            "status": "ok",
+            "fake_platforms": svc.settings.fake_platforms,
+            "nango_enabled": svc.nango is not None,
+        }
 
     mount_frontend(app, paths.FRONTEND_DIST)
     return app

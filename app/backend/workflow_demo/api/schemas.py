@@ -29,6 +29,8 @@ class ConnectorStatus(BaseModel):
     purpose: str
     help: str | None = None
     connected: bool
+    label: str | None = None  # e.g. the Slack workspace or Google email; never a secret
+    secret: bool = False  # manual connectors: the value is hidden once saved
     managed_by_platform: bool  # connected inside the platform's popup, not in the demo
 
 

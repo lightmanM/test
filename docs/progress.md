@@ -3,8 +3,8 @@
 Living document. Update at the end of every work session and every PR.
 
 ## Current status
-- **Phase**: P1b Frontend — in review.
-- **Next step**: merge the P1b PR, then start P2 (connections: Nango + manual secrets).
+- **Phase**: P2 Connections — in review.
+- **Next step**: merge the P2 PR, then start P3 (n8n adapter + transforms).
 - **Blocked on owner**: nothing until P7 (credentials). See plan §15.
 
 ## Phases and PRs
@@ -13,8 +13,8 @@ Living document. Update at the end of every work session and every PR.
 |---|---|---|---|
 | P0 Foundations | [#1](https://github.com/lightmanM/test/pull/1) | merged | repo layout, tooling, CI, catalog + fixed templates, SDK compile, setup guide |
 | P1a Backend core | [#2](https://github.com/lightmanM/test/pull/2) | merged | auth, DB, catalog API, state machine, fake adapters |
-| P1b Frontend | [#3](https://github.com/lightmanM/test/pull/3) | in review | sign-in, catalog, workflow page, admin shell |
-| P2 Connections | — | not started | Nango connect + manual secrets |
+| P1b Frontend | [#3](https://github.com/lightmanM/test/pull/3) | merged | sign-in, catalog, workflow page, admin shell |
+| P2 Connections | #4 | in review | Nango connect + manual secrets |
 | P3 n8n | — | not started | adapter, 3 transforms, shared credentials, Run now, results |
 | P4 Modal services | — | not started | reader + bot on Modal, bot patches, "Activate for me" |
 | P5 Make Bridge | — | not started | Bridge adapter, popup + callback, unavailable state |
@@ -67,9 +67,23 @@ catch-all route answers unknown non-GET/API paths with 404; `safe_static_file` t
 - [x] Playwright click-through in fake mode
 
 ### P2 Connections
-- [ ] Nango connect session + verify tags + store connection; Slack channel picker
-- [ ] Manual secrets (Meegle token, user key) with AES-GCM
-- [ ] Tests with mocked Nango
+Notes: `nango.py` (REST client: connect sessions, get connection with refresh, delete), `crypto.py` (AES-256-GCM,
+associated data `user:{id}:connector:{id}`), `services/connections.py` (flows + per-connector checks) and
+`api/connections.py`. Connect: `POST /api/connections/{id}/session` → Nango Connect UI (`@nangohq/frontend`,
+lazy-loaded, `src/nango.ts`) → `POST …/complete {connection_id}`; the backend re-reads the connection from Nango and
+requires `tags.end_user_id == username` and the expected integration; a reconnect deletes the old Nango connection.
+Stored details (never tokens): Slack team, `slack_user_id`, `bot_user_id`; Google email (OpenID userinfo). Deploys
+call `fresh_credentials()` (Nango refreshes) and `read_secret()`. Manual values: `PUT …/secret`; secret ones are
+shown only as "saved · ends with 1234". `GET /api/slack/channels` feeds the settings picker (falls back to an ID box).
+Without `NANGO_SECRET_KEY`, fake mode keeps the demo-data button; `/api/health` reports `nango_enabled`.
+Review fixes: rows are saved before the replaced Nango connection is deleted (`_store`), and a concurrent first save
+retries as an update; the secret-storage check runs before any change; connection IDs are validated and URL-escaped;
+unexpected Nango responses become clean errors; damaged ciphertexts raise `CryptoError`; the refresh token is never
+requested; the Connect UI uses the server's `NANGO_HOST` / `NANGO_CONNECT_URL`; one shared, closed HTTP client;
+`.env.example` has no real key.
+- [x] Nango connect session + verify tags + store connection; Slack channel picker
+- [x] Manual secrets (Meegle token, user key) with AES-GCM
+- [x] Tests with mocked Nango (respx), Connect UI unit tests, E2E for the token and user-key forms
 
 ### P3 n8n
 - [ ] n8n client (schema check, credentials, workflows, publish/activate fallback, executions)
@@ -115,6 +129,7 @@ catch-all route answers unknown non-GET/API paths with 404; `safe_static_file` t
 | 2026-10-04 | Leaked Meegle token removed from git history (2 commits rewritten; `main` now at e7c40dc). Owner to revoke the token in Meegle. |
 
 ## Session log
+- 2026-10-04: PR #3 (P1b) merged. P2 implemented and reviewed (10 findings fixed): 88 backend tests, 8 unit + 5 E2E (frontend).
 - 2026-10-04: PR #2 (P1a) merged. P1b implemented: 4 E2E + 3 unit (frontend), 70 backend tests.
 - 2026-10-04: PR #1 (P0) reviewed, fixed, CI green, merged. P1a implemented, reviewed (10 findings fixed): 69 tests passing.
 - 2026-10-04: P0 implemented (catalog, template fixes, compile script, setup guide, CI); 20 tests passing.

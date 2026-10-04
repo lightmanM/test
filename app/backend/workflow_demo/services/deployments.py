@@ -29,7 +29,7 @@ from workflow_demo.adapters.base import (
     RunSummary,
 )
 from workflow_demo.catalog.models import ConnectorKind, WorkflowEntry
-from workflow_demo.db import Deployment, DeploymentEvent, Job, User, utcnow
+from workflow_demo.db import Connection, Deployment, DeploymentEvent, Job, User, utcnow
 from workflow_demo.services.container import AppServices
 from workflow_demo.services.settings_schema import validate_settings
 from workflow_demo.services.states import BUSY, Status, check_transition
@@ -86,8 +86,12 @@ def required_connectors(svc: AppServices, entry: WorkflowEntry) -> list[str]:
     ]
 
 
+def active_connections(user: User) -> dict[str, Connection]:
+    return {c.connector: c for c in user.connections if c.status == "active"}
+
+
 def active_connectors(user: User) -> set[str]:
-    return {c.connector for c in user.connections if c.status == "active"}
+    return set(active_connections(user))
 
 
 def missing_connectors(svc: AppServices, entry: WorkflowEntry, connected: set[str]) -> list[str]:
