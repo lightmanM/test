@@ -45,7 +45,9 @@ def write_value(path: Path, key: str, value: str) -> None:
 class N8n:
     def __init__(self, host: str) -> None:
         self._base = f"https://{host}/rest"
-        self._opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        self._opener = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
+        )
 
     def call(self, method: str, path: str, body: object = None) -> object:
         request = urllib.request.Request(
@@ -72,7 +74,9 @@ def sign_in(n8n: N8n, owner: dict[str, str]) -> None:
     email, password = owner["N8N_OWNER_EMAIL"], owner["N8N_OWNER_PASSWORD"]
     try:
         n8n.call(
-            "POST", "/owner/setup", {"email": email, "firstName": "Demo", "lastName": "Owner", "password": password}
+            "POST",
+            "/owner/setup",
+            {"email": email, "firstName": "Demo", "lastName": "Owner", "password": password},
         )
         print(f"Created the n8n owner {email}")
     except N8nError as exc:
@@ -96,7 +100,10 @@ def main() -> None:
     scopes = n8n.call("GET", "/api-keys/scopes")
     created = n8n.call("POST", "/api-keys", {"label": KEY_LABEL, "scopes": scopes, "expiresAt": None})
     write_value(PRODUCTION, "N8N_API_KEY", created["rawApiKey"])
-    print(f"Created API key '{KEY_LABEL}' ({len(scopes)} scopes) → N8N_API_KEY in {PRODUCTION.relative_to(ROOT)}")
+    print(
+        f"Created API key '{KEY_LABEL}' ({len(scopes)} scopes)"
+        f" → N8N_API_KEY in {PRODUCTION.relative_to(ROOT)}"
+    )
     print(f"Owner login for https://{host}: {OWNER.relative_to(ROOT)}")
 
 

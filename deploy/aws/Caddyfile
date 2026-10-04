@@ -7,12 +7,11 @@
 }
 
 {$N8N_HOST} {
-	# Until setup_n8n.py has created the owner, anyone could claim a fresh instance: allow the
-	# owner sign-up only from the machine that runs deploy.sh (ADMIN_IP, set by deploy.sh).
-	@owner_setup {
-		path /rest/owner/setup
-		not remote_ip {$ADMIN_IP:127.0.0.1}
-	}
-	respond @owner_setup 403
+	# The demo reaches n8n over the internal network; this public editor is only for the owner. Only
+	# the machine that ran deploy.sh (ADMIN_IP) gets through, so nobody else can claim a fresh
+	# instance before setup_n8n.py runs. The whole host is restricted rather than single paths:
+	# n8n's router also accepts other spellings of a path (case, trailing slash) than Caddy's matcher.
+	@outsider not remote_ip {$ADMIN_IP:127.0.0.1}
+	respond @outsider 403
 	reverse_proxy n8n:5678
 }

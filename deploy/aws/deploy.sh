@@ -30,7 +30,7 @@ if $WITH_BOT; then
     || die "BOT_API_TOKEN differs between deploy/aws/bot.env and deploy/production.env"
   SETTINGS="$SETTINGS $APP_DIR/deploy/aws/bot.env"
 fi
-# Caddy lets only this machine claim a fresh n8n instance (see Caddyfile); setup_n8n.py runs from here.
+# Caddy lets only this machine reach the n8n editor (see Caddyfile); setup_n8n.py runs from here.
 ADMIN_IP=$(curl -fsS https://checkip.amazonaws.com | tr -d '[:space:]')
 
 SSH=(ssh -i "$KEY_FILE" -o StrictHostKeyChecking=accept-new "ubuntu@$SERVER")

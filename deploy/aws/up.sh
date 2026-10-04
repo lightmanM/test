@@ -6,6 +6,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 WITH_BOT=${WITH_BOT:-false}
+CADDYFILE_HASH=$(sha256sum Caddyfile | cut -c1-16)  # a changed Caddyfile recreates caddy (compose.yml)
+export CADDYFILE_HASH
 PROFILE=()
 [ "$WITH_BOT" = true ] && PROFILE=(--profile bot)
 
