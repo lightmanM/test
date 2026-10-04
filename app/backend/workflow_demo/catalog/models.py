@@ -103,6 +103,8 @@ class WorkflowEntry(Strict):
     settings: list[Setting] = Field(default_factory=list)
     try_it: str
     run_now: bool = True
+    # Shown to testers when the server lists this workflow in DISABLED_WORKFLOWS.
+    unavailable_note: str | None = None
     n8n: N8nSpec | None = None
     make: MakeSpec | None = None
     modal: ModalSpec | None = None

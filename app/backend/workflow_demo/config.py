@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     fake_platforms: bool = Field(default=False, validation_alias="DEMO_FAKE_PLATFORMS")
     # Jobs run inside this process, so on startup any unfinished job was lost: fail it.
     recover_jobs_on_startup: bool = True
+    # Comma-separated workflow IDs switched off on this server (shown with the catalog's unavailable_note).
+    disabled_workflows: str = ""
 
     # Connections
     nango_secret_key: SecretStr | None = None
