@@ -69,7 +69,7 @@ def test_uptime_deploy_run_and_delete(real):
     catalog = {w["id"]: w for w in client.get("/api/workflows").json()}
     assert catalog["uptime-monitor"]["available"] and catalog["uptime-monitor"]["ready"]
     assert not catalog["github-merge-slack"]["available"]
-    assert "isn't configured" in catalog["github-merge-slack"]["unavailable_reason"]
+    assert "MAKE_BRIDGE_KEY_ID" in catalog["github-merge-slack"]["unavailable_reason"]
     assert not catalog["medium-digest"]["available"]  # no OpenAI key / reader yet
 
     respx.post("https://sheets.googleapis.com/v4/spreadsheets").mock(

@@ -105,7 +105,7 @@ a "Run now" trigger.
 - **Deploy flow** (Bridge portal API at `https://us2.make.com/portal/api/bridge/...`, each call authorized with a 2-minute JWT `{sub: <username>, jti}` signed with the Bridge secret — per-user sandbox):
   1. `POST /integrations/init/{templateId}` with `redirectUri`, `prefill`, `allowReusingComponents: true`, scenario name → `publicUrl`, `flow.id`.
   2. Frontend opens `publicUrl` in a popup; user connects GitHub + Slack and fills the settings.
-  3. Make redirects to `/make/callback`; backend calls `GET /integrations/check-init/{flowId}` → scenario ID.
+  3. Make redirects to `/make/callback`; the backend queues a job that polls `GET /integrations/check-init/{flowId}` → scenario ID.
   4. `POST /integrations/{scenarioId}/activate`.
 - **Try it / results**: merge a PR in the chosen repo, then Run now (`POST /integrations/{scenarioId}/run`); demo shows run history from `GET /scenarios/{scenarioId}/logs`.
 - **Redeploy**: delete old scenario, run the init flow again (existing Make connections are offered for reuse). **Undeploy**: deactivate + `DELETE /integrations/{scenarioId}`.

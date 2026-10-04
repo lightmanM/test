@@ -45,6 +45,7 @@ NONCE_REF = "user_step_nonce"
 JOB_EXPECTS = {
     "deploy": Status.DEPLOYING,
     "redeploy": Status.REDEPLOYING,
+    "finish": Status.DEPLOYING,  # after the user's popup step (Make Bridge)
     "undeploy": Status.STOPPING,
     "expire": Status.STOPPING,
 }
@@ -249,24 +250,23 @@ def request_expire(svc: AppServices, db: Session, dep: Deployment) -> bool:
 def finish_user_step(
     svc: AppServices, db: Session, state: dict[str, Any], params: dict[str, str]
 ) -> Deployment:
-    """Called when the user comes back from the platform's popup (Make Bridge)."""
+    """Called when the user comes back from the platform's popup (Make Bridge).
+
+    Claims the deployment (so a repeated redirect can't finish it twice) and queues a job that
+    completes the deploy on the platform; the popup page answers right away."""
     dep = db.get(Deployment, int(state.get("deployment_id", 0)))
     if dep is None:
         raise DeploymentError("Unknown deployment", 404)
-    if dep.status != Status.AWAITING_USER:
-        raise DeploymentError("This deployment isn't waiting for you")
     nonce = (dep.platform_refs or {}).get(NONCE_REF)
     if not nonce or not secrets.compare_digest(str(state.get("nonce", "")), nonce):
         raise DeploymentError("This link is from an earlier deploy; use the latest popup")
-    entry = workflow_entry(svc, dep.workflow_id)
-    try:
-        result = svc.registry.get(entry.platform).finish_user_step(build_context(svc, dep, entry), params)
-        _apply_result(svc, dep, result, nonce=None)
-    except AdapterError as exc:
-        _fail(dep, str(exc))
-        db.commit()
-        raise DeploymentError(str(exc), 502) from None
-    db.commit()
+    if dep.status == Status.DEPLOYING:
+        return dep  # the same popup came back twice; the first callback is already finishing
+    if dep.status != Status.AWAITING_USER:
+        raise DeploymentError("This deployment isn't waiting for you")
+    claim_status(db, dep, Status.DEPLOYING)
+    add_event(dep, "finishing", "You finished in the platform's popup; completing the deploy")
+    _queue_job(svc, db, dep, "finish", {"params": dict(params)})
     return dep
 
 
@@ -345,6 +345,11 @@ def _execute(svc: AppServices, db: Session, job: Job, dep: Deployment) -> None:
         adapter.undeploy(build_context(svc, dep, entry))  # old settings + old refs
         dep.platform_refs = {}
         add_event(dep, "removed", "Removed the previous deployment from the platform")
+    if job.kind == "finish":
+        params = {str(k): str(v) for k, v in ((job.payload or {}).get("params") or {}).items()}
+        result = adapter.finish_user_step(build_context(svc, dep, entry), params)
+        _apply_result(svc, dep, result, nonce=None)
+        return
     if job.kind in ("deploy", "redeploy"):
         dep.inputs = dict((job.payload or {}).get("settings", {}))
         nonce = secrets.token_urlsafe(16)

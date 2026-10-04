@@ -11,13 +11,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class DatabaseSettings(BaseSettings):
     """Just the database URL; used by Alembic, which doesn't need the rest."""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_ignore_empty=True)
 
     database_url: str = "sqlite:///./workflow_demo.db"
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Empty values (``KEY=`` lines in .env.example) count as unset.
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_ignore_empty=True)
 
     # Access
     demo_passcode: SecretStr
@@ -51,6 +52,13 @@ class Settings(BaseSettings):
     openai_base_url: str = "https://api.openai.com/v1"
     reader_base_url: str | None = None  # the medium-reader service (P4)
     reader_api_token: SecretStr | None = None
+
+    # Make Bridge (GitHub merge → Slack, P5); see catalog/github-merge-slack/make-setup.md
+    make_zone: str = "us2.make.com"
+    make_team_id: int | None = None
+    make_bridge_key_id: str | None = None
+    make_bridge_secret: SecretStr | None = None
+    make_bridge_template_id: int | None = None
 
     # Shared Slack → Meegle bot on Modal (P4): it calls /api/bot/* with this token.
     bot_api_token: SecretStr | None = None
