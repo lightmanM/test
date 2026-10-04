@@ -3,8 +3,8 @@
 Living document. Update at the end of every work session and every PR.
 
 ## Current status
-- **Phase**: P4 Modal services — in review.
-- **Next step**: merge the P4 PR, then start P5 (Make Bridge adapter).
+- **Phase**: P5 Make Bridge — in review.
+- **Next step**: merge the P5 PR, then start P6 (lifecycle sweeper, admin, setup check).
 - **Blocked on owner**: nothing until P7 (credentials). See plan §15.
 
 ## Phases and PRs
@@ -16,8 +16,8 @@ Living document. Update at the end of every work session and every PR.
 | P1b Frontend | [#3](https://github.com/lightmanM/test/pull/3) | merged | sign-in, catalog, workflow page, admin shell |
 | P2 Connections | [#4](https://github.com/lightmanM/test/pull/4) | merged | Nango connect + manual secrets |
 | P3 n8n | [#5](https://github.com/lightmanM/test/pull/5) | merged | adapter, 3 transforms, per-deployment credentials, Run now, results |
-| P4 Modal services | #6 | in review | reader + bot on Modal, bot patches, "Activate for me" |
-| P5 Make Bridge | — | not started | Bridge adapter, popup + callback, unavailable state |
+| P4 Modal services | [#6](https://github.com/lightmanM/test/pull/6) | merged | reader + bot on Modal, bot patches, "Activate for me" |
+| P5 Make Bridge | #7 | in review | Bridge adapter, popup + callback, unavailable state |
 | P6 Lifecycle & admin | — | not started | 24 h sweeper, redeploy/delete, admin page, setup check, E2E |
 | P7 Go live | — | not started | Modal + Neon deploy, owner credentials, live checklist |
 
@@ -128,9 +128,18 @@ optional `SLACK_BOT_TEAM_ID` workspace check; card history kept on redeploy). Th
 - [x] Bot API endpoints; "Activate for me" flow; E2E posts a bot card and sees it under Results
 
 ### P5 Make Bridge
-- [ ] Bridge client (JWT per request), availability check → "unavailable"
-- [ ] init → popup → `/make/callback` → check-init → activate; run; logs; delete
-- [ ] `catalog/github-merge-slack/make-setup.md`
+Notes: `make_bridge.py` (portal API client; HS256 JWT per request built with the stdlib — `kid` = key ID, `sub` =
+`workflow-demo:<username>`, 2-minute expiry, random `jti`; optional `teamId`), `adapters/make.py`
+(`MakeBridgeAdapter`). Deploy: `init` with `redirectUri` = the signed `/make/callback?state=…` → `awaiting_user` with
+Make's `publicUrl` (the existing popup handling opens it) → callback → `check-init` (retried briefly while Make
+finishes) → activate the scenario (extra scenarios deleted; on failure everything created is deleted). Undeploy:
+deactivate + delete; if the callback never arrived, the flow is checked and any created scenario removed. Run now:
+`/integrations/{id}/run`; results from `/scenarios/{id}/logs` (status 1 ok, 2 warnings, 3 error; duration →
+finish time; non-execution events skipped). Availability: missing settings → "Not set up…"; `GET /integrations/`
+401/403/404 → "Deploy unavailable: Make Bridge isn't enabled…"; cached 10 min (1 min when unreachable).
+- [x] Bridge client (JWT per request), availability check → "unavailable"
+- [x] init → popup → `/make/callback` → check-init → activate; run; logs; delete
+- [x] `catalog/github-merge-slack/make-setup.md` (JWT details, redirect URL, settings)
 
 ### P6 Lifecycle & admin
 - [ ] Sweeper: 24 h expiry, status reconcile
@@ -162,6 +171,7 @@ optional `SLACK_BOT_TEAM_ID` workspace check; card history kept on redeploy). Th
 | 2026-10-04 | Leaked Meegle token removed from git history (2 commits rewritten; `main` now at e7c40dc). Owner to revoke the token in Meegle. |
 
 ## Session log
+- 2026-10-04: PR #6 (P4) merged. P5 implemented: 139 backend tests (Bridge client + adapter contract, API popup flow).
 - 2026-10-04: PR #5 (P3) merged. P4 implemented and reviewed (8 findings fixed): 127 backend tests, 3 bot Node tests, 5 E2E.
 - 2026-10-04: PR #4 (P2) merged. P3 implemented and reviewed (10 findings fixed): 117 backend tests (transform golden, adapter contract, API flow).
 - 2026-10-04: PR #3 (P1b) merged. P2 implemented and reviewed (10 findings fixed): 88 backend tests, 8 unit + 5 E2E (frontend).

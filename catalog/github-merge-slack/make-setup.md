@@ -44,13 +44,18 @@ the URL of module 2) and Slack channel `C0C5E88SKSP` (module 3).
 ## 4. Bridge application key
 
 1. Bridge settings → Applications → create an application for the demo; set the allowed
-   redirect URL to `<PUBLIC_BASE_URL>/make/callback`.
+   redirect URL to `<PUBLIC_BASE_URL>/make/callback` (the demo appends `?state=<signed token>`;
+   if Make requires an exact match, allow the URL with any query string).
 2. Secrets → create a secret; note the **key ID** and **secret** → `MAKE_BRIDGE_KEY_ID`,
-   `MAKE_BRIDGE_SECRET`. The demo signs a 2-minute JWT `{sub: <username>, jti}` per request.
+   `MAKE_BRIDGE_SECRET`. The demo signs a 2-minute HS256 JWT `{sub: "workflow-demo:<username>",
+   jti, iat, exp}` with `kid` = key ID per request, so each tester gets their own Bridge sandbox.
+3. Demo settings: `MAKE_BRIDGE_TEMPLATE_ID` (step 3), `MAKE_ZONE` (default `us2.make.com`) and,
+   if the template lives in a specific team, `MAKE_TEAM_ID`.
 
 ## 5. Verify
 
-- [ ] Admin page → Setup check shows "Make Bridge: available".
+- [ ] The workflow card is available (the demo calls `GET /integrations/` for a setup-check user;
+      a 401/403/404 shows "Deploy unavailable: Make Bridge isn't enabled for the owner's account").
 - [ ] A test user deploys: Make's popup asks for GitHub, Slack, repo and channel; the demo shows
       the deployment as active.
 - [ ] Merge a PR in the test repo → Run now → diff posted in the channel; run listed in the demo.

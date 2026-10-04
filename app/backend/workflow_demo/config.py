@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     reader_base_url: str | None = None  # the medium-reader service (P4)
     reader_api_token: SecretStr | None = None
 
+    # Make Bridge (GitHub merge → Slack, P5); see catalog/github-merge-slack/make-setup.md
+    make_zone: str = "us2.make.com"
+    make_team_id: int | None = None
+    make_bridge_key_id: str | None = None
+    make_bridge_secret: SecretStr | None = None
+    make_bridge_template_id: int | None = None
+
     # Shared Slack → Meegle bot on Modal (P4): it calls /api/bot/* with this token.
     bot_api_token: SecretStr | None = None
     # Optional: the bot's Slack workspace; testers must connect Slack in the same one.
