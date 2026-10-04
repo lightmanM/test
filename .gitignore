@@ -24,3 +24,6 @@ app/frontend/playwright-report/
 
 # Filled-in production settings (deploy/production.env.example is the template)
 deploy/production.env
+# Filled-in AWS server settings (deploy/aws/.env is covered by `.env` above)
+deploy/aws/*.env
+deploy/aws/*.json

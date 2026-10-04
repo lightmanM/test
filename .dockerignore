@@ -1,0 +1,18 @@
+# Build context of deploy/aws/demo.Dockerfile and bot.Dockerfile (the repo root): keep settings,
+# secrets and local build output out of the images.
+.git
+**/.DS_Store
+**/node_modules
+**/.venv
+**/__pycache__
+**/*.egg-info
+**/.*_cache
+**/*.db
+**/.env
+**/.env.*
+**/*.env
+app/frontend/dist
+app/frontend/test-results
+app/frontend/playwright-report
+connector-demo
+demo-project/slark-meegle-bot/data

@@ -1,6 +1,7 @@
-"""Local development server: ``python -m workflow_demo`` (reads app/backend/.env).
+"""Server: ``python -m workflow_demo`` (reads app/backend/.env) — local runs and the AWS container.
 
-Creates the SQLite tables directly; deployed databases use ``alembic upgrade head``.
+Creates the SQLite tables directly; deployed databases use ``alembic upgrade head``. Listens on
+``HOST`` (default 127.0.0.1; the container sets 0.0.0.0) and ``PORT`` (default 8000).
 """
 
 from __future__ import annotations
@@ -20,7 +21,11 @@ def main() -> None:
     svc = build_services(settings)
     if settings.database_url.startswith("sqlite"):
         svc.db.create_all()
-    uvicorn.run(create_app(settings, svc), host="127.0.0.1", port=int(os.environ.get("PORT", "8000")))
+    uvicorn.run(
+        create_app(settings, svc),
+        host=os.environ.get("HOST", "127.0.0.1"),
+        port=int(os.environ.get("PORT", "8000")),
+    )
 
 
 if __name__ == "__main__":
