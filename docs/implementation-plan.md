@@ -193,7 +193,7 @@ All adapters implement: `check_available()`, `deploy(ctx)`, `undeploy(ctx)`, `ru
 
 **n8n** (`X-N8N-API-KEY`):
 - `GET /credentials/schema/{type}` at startup to validate payloads; `POST /credentials`; `DELETE /credentials/{id}`.
-- `POST /workflows` (read-only fields stripped, strict `settings`), `POST /workflows/{id}/publish` with fallback to `/activate` on older versions; `DELETE /workflows/{id}`; tags `workflow-demo`, `user:<name>`.
+- `POST /workflows` (read-only fields stripped, strict `settings`), `POST /workflows/{id}/publish` with fallback to `/activate` on older versions; `DELETE /workflows/{id}`; everything the demo creates is named `[demo] …` / `demo · <user> · …` (no tags).
 - Run now: each deployed workflow gets a Webhook trigger (unique path, header-auth credential); backend POSTs to it.
 - Results: `GET /executions?workflowId=…&includeData=true` → status, timing, error, summary node output.
 
@@ -245,14 +245,14 @@ demo-project/                     the team's originals (unchanged)
 | Area | Settings |
 |---|---|
 | Demo | `DEMO_PASSCODE`, `ADMIN_PASSCODE`, `SESSION_SECRET`, `DATA_ENCRYPTION_KEY`, `PUBLIC_BASE_URL`, `MAX_USERS=10`, `DEPLOYMENT_TTL_HOURS=24` |
-| Database | `DATABASE_URL` (Neon) |
+| Database | `DATABASE_URL` (Neon, pooled), `MIGRATION_DATABASE_URL` (direct, for migrations) |
 | Nango | `NANGO_SECRET_KEY`, integration keys |
 | Google (Internal OAuth client) | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (also needed for n8n Google credentials) |
 | Slack connect app | client ID / secret (configured in Nango) |
 | n8n | `N8N_BASE_URL`, `N8N_API_KEY` |
-| Make | `MAKE_ZONE=us2.make.com`, `MAKE_API_TOKEN`, `MAKE_TEAM_ID`, `MAKE_BRIDGE_KEY_ID`, `MAKE_BRIDGE_SECRET`, `MAKE_BRIDGE_TEMPLATE_ID` |
+| Make | `MAKE_ZONE=us2.make.com`, `MAKE_TEAM_ID` (optional), `MAKE_BRIDGE_KEY_ID`, `MAKE_BRIDGE_SECRET`, `MAKE_BRIDGE_TEMPLATE_ID` (Bridge API only) |
 | Modal | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` |
-| LLM | `OPENAI_API_KEY`, optional `OPENAI_BASE_URL`, `LLM_MODEL` |
+| LLM | `OPENAI_API_KEY`, optional `OPENAI_BASE_URL` (testers pick the model) |
 | Reader | `READER_API_TOKEN` (generated), `FREEDIUM_BASE_URL` |
 | Slack bot | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `MEEGLE_PLUGIN_ID`, `MEEGLE_PLUGIN_SECRET`, `MEEGLE_PROJECT_KEY`, `MEEGLE_SIMPLE_NAME`, `MEEGLE_WORK_ITEM_TYPE_KEY`, `MEEGLE_USER_KEY`, `BOT_API_TOKEN` |
 

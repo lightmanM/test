@@ -21,3 +21,6 @@ scripts/.tmp-*
 app/frontend/test-results/
 app/frontend/playwright-report/
 *.tsbuildinfo
+
+# Filled-in production settings (deploy/production.env.example is the template)
+deploy/production.env

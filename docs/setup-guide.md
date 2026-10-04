@@ -112,14 +112,14 @@ Produces: `N8N_BASE_URL` (e.g. `https://yourname.app.n8n.cloud`), `N8N_API_KEY`.
 
 ## 6. Make
 
-1. **Profile → API access → Add token** with scopes `scenarios:read`, `scenarios:write`,
-   `scenarios:run`, `connections:read`, `teams:read`, `organizations:read`.
-2. Team ID: the number in the team URL (`…/team/<id>/…`).
-3. Bridge template and application key: follow `catalog/github-merge-slack/make-setup.md`.
+1. Team ID: the number in the team URL (`…/team/<id>/…`) — only needed if the Bridge template
+   lives in a specific team.
+2. Bridge template and application key: follow `catalog/github-merge-slack/make-setup.md`.
    No Bridge on the account → the workflow shows "Deploy unavailable"; nothing else to do.
 
-Produces: `MAKE_API_TOKEN`, `MAKE_TEAM_ID`, `MAKE_BRIDGE_TEMPLATE_ID`, `MAKE_BRIDGE_KEY_ID`,
-`MAKE_BRIDGE_SECRET` (`MAKE_ZONE` = `us2.make.com`).
+The demo only talks to the Bridge API (no Make API token needed). Produces: `MAKE_TEAM_ID`
+(optional), `MAKE_BRIDGE_TEMPLATE_ID`, `MAKE_BRIDGE_KEY_ID`, `MAKE_BRIDGE_SECRET`
+(`MAKE_ZONE` = `us2.make.com`).
 
 ## 7. Modal
 
@@ -130,15 +130,17 @@ are deployed into this workspace.
 
 ## 8. Neon
 
-1. Create a project at <https://neon.tech> (free tier is enough).
-2. Copy the **pooled** connection string (`postgresql://…?sslmode=require`).
+1. Create a project at <https://neon.tech> (free tier is enough; the demo's sweeper runs every
+   30 minutes, so the compute can suspend in between).
+2. Copy the **pooled** connection string (`postgresql://…-pooler…?sslmode=require`) for the app and
+   the **direct** one (connection pooling off) for schema migrations.
 
-Produces: `DATABASE_URL`.
+Produces: `DATABASE_URL` (pooled), `MIGRATION_DATABASE_URL` (direct).
 
 ## 9. AI key and Meegle
 
-- **OpenAI-compatible key** for the Medium digest: `OPENAI_API_KEY` (optional `OPENAI_BASE_URL`,
-  `LLM_MODEL`, default `gpt-4o-mini`).
+- **OpenAI-compatible key** for the Medium digest: `OPENAI_API_KEY` (optional `OPENAI_BASE_URL`;
+  testers pick the model, default `gpt-4o-mini`).
 - **Meegle, shared bot** (see `demo-project/slark-meegle-bot/README.md` for where each comes from):
   `MEEGLE_PLUGIN_ID`, `MEEGLE_PLUGIN_SECRET`, `MEEGLE_PROJECT_KEY`, `MEEGLE_SIMPLE_NAME`,
   `MEEGLE_WORK_ITEM_TYPE_KEY`, `MEEGLE_USER_KEY` (service account), optional `MEEGLE_ROLE_KEY`.
@@ -146,8 +148,8 @@ Produces: `DATABASE_URL`.
 
 ## 10. Demo configuration
 
-All values above, plus these generated ones, go into a Modal secret named `workflow-demo`
-(full list in `docs/implementation-plan.md` §11):
+All values above, plus these generated ones, go into a Modal secret named `workflow-demo-app`
+(template: `deploy/production.env.example`; step-by-step: `docs/go-live.md`):
 
 | Setting | Value |
 |---|---|

@@ -3,9 +3,10 @@
 Living document. Update at the end of every work session and every PR.
 
 ## Current status
-- **Phase**: P6 Lifecycle & admin — in review.
-- **Next step**: merge the P6 PR, then P7 (go live) once the owner provides credentials (plan §15).
-- **Blocked on owner**: nothing until P7 (credentials). See plan §15.
+- **Phase**: P7 Go live — packaging in review; the live part waits on the owner's credentials.
+- **Next step**: merge the P7 PR; then the owner provides the accounts and keys (plan §15) and we run
+  `docs/go-live.md` together.
+- **Blocked on owner**: credentials for P7 (plan §15).
 
 ## Phases and PRs
 
@@ -18,8 +19,8 @@ Living document. Update at the end of every work session and every PR.
 | P3 n8n | [#5](https://github.com/lightmanM/test/pull/5) | merged | adapter, 3 transforms, per-deployment credentials, Run now, results |
 | P4 Modal services | [#6](https://github.com/lightmanM/test/pull/6) | merged | reader + bot on Modal, bot patches, "Activate for me" |
 | P5 Make Bridge | [#7](https://github.com/lightmanM/test/pull/7) | merged | Bridge adapter, popup + callback, unavailable state |
-| P6 Lifecycle & admin | #8 | in review | 24 h sweeper, redeploy/delete, admin page, setup check, E2E |
-| P7 Go live | — | not started | Modal + Neon deploy, owner credentials, live checklist |
+| P6 Lifecycle & admin | [#8](https://github.com/lightmanM/test/pull/8) | merged | 24 h sweeper, redeploy/delete, admin page, setup check, E2E |
+| P7 Go live | #9 | in review (packaging); live part waits on owner | Modal + Neon deploy, owner credentials, live checklist |
 
 ## Phase checklists
 
@@ -166,9 +167,17 @@ Admin page: setup check, "Run sweeper now", Stop per deployment.
 - [x] E2E: admin setup check, sweeper, stop
 
 ### P7 Go live
-- [ ] Deploy demo + services to Modal; Neon migration
-- [ ] Owner credentials configured; setup check green
-- [ ] Live test of every workflow; short-TTL expiry test
+Notes: `deploy/modal_app.py` — the demo on Modal: `web` (ASGI, FastAPI + built SPA, `@modal.concurrent`), `Jobs.run`
+(one function call per deploy job via `ModalJobRunner` → survives web scale-down; services built once per container
+with `@modal.enter`, DB pool disposed on exit), `sweeper` (cron every 30 min, so Neon can suspend; the Modal entrypoints
+force `recover_jobs_on_startup=False` and `sweep_interval_seconds=0` in code since several containers share the DB),
+`migrate` (`alembic upgrade head`, via `MIGRATION_DATABASE_URL` = Neon's direct URL if set). Containers refuse a
+non-Postgres `DATABASE_URL`. A job that can't be started fails its deployment at once (503) instead of leaving it
+busy. Settings come from the Modal secret `workflow-demo-app`
+(`deploy/production.env.example`, `ORPHAN_SWEEP=true`). Step-by-step: `docs/go-live.md`.
+- [x] Modal app for the demo (web, jobs, sweeper, migrate) + production settings template + go-live guide
+- [ ] Owner credentials configured; services and demo deployed; setup check green (needs the owner, §15)
+- [ ] Live test of every workflow; short-TTL expiry test (`docs/go-live.md` §6)
 
 ## Decision log
 
@@ -188,6 +197,7 @@ Admin page: setup check, "Run sweeper now", Stop per deployment.
 | 2026-10-04 | Leaked Meegle token removed from git history (2 commits rewritten; `main` now at e7c40dc). Owner to revoke the token in Meegle. |
 
 ## Session log
+- 2026-10-04: PR #8 (P6) merged. P7 packaging: Modal app for the demo, production settings template, go-live guide; reviewed (10 findings fixed), 157 backend tests.
 - 2026-10-04: PR #7 (P5) merged. P6 implemented and reviewed (10 findings fixed): 156 backend tests, 5 E2E (admin lifecycle).
 - 2026-10-04: PR #6 (P4) merged. P5 implemented and reviewed (10 findings fixed): 143 backend tests (Bridge client + adapter contract, API popup flow).
 - 2026-10-04: PR #5 (P3) merged. P4 implemented and reviewed (8 findings fixed): 127 backend tests, 3 bot Node tests, 5 E2E.
