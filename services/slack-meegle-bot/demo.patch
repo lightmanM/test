@@ -1,0 +1,148 @@
+diff --git a/src/demoEvents.js b/src/demoEvents.js
+new file mode 100644
+index 0000000..7dca484
+--- /dev/null
++++ b/src/demoEvents.js
+@@ -0,0 +1,26 @@
++'use strict';
++
++/**
++ * Demo deployment only: tell the demo backend about each created card so the tester sees it
++ * under Results. No-op unless CARD_EVENTS_URL is set; failures never affect the bot.
++ */
++
++const CARD_EVENTS_URL = process.env.CARD_EVENTS_URL || '';
++const BOT_API_TOKEN = process.env.BOT_API_TOKEN || '';
++
++async function reportCard({ slackUserId, title, url }) {
++  if (!CARD_EVENTS_URL) return;
++  try {
++    const res = await fetch(CARD_EVENTS_URL, {
++      method: 'POST',
++      headers: { 'content-type': 'application/json', authorization: `Bearer ${BOT_API_TOKEN}` },
++      body: JSON.stringify({ slack_user_id: slackUserId, title, url }),
++      signal: AbortSignal.timeout(10000),
++    });
++    if (!res.ok) throw new Error(`HTTP ${res.status}`);
++  } catch (e) {
++    console.error('[demoEvents] card event failed:', e.message);
++  }
++}
++
++module.exports = { reportCard };
+diff --git a/src/index.js b/src/index.js
+index a839f7a..8116303 100644
+--- a/src/index.js
++++ b/src/index.js
+@@ -9,7 +9,8 @@
+ const { App } = require('@slack/bolt');
+ const { parseMentionText, slackMention } = require('./parse');
+ const { createWorkItem, cardUrl } = require('./meegle');
+-const { getMeegleUserKey, bindUser } = require('./userMap');
++const { getMeegleUserKey, bindUser, isRemote } = require('./userMap');
++const { reportCard } = require('./demoEvents');
+ 
+ const BIND_HINT = '用法：`@toldmeegle 卡片标题 @负责人`\n例如：`@toldmeegle 修复登录页报错 @张三`';
+ 
+@@ -36,14 +37,17 @@ app.event('app_mention', async ({ event, client, context }) => {
+   // 1) 把被 @ 的 Slack 用户映射成 Meegle user_key
+   const assigneeUserKeys = [];
+   const unmapped = [];
+-  for (const slackId of assigneeSlackIds) {
+-    const key = getMeegleUserKey(slackId);
+-    if (key) assigneeUserKeys.push(key);
++  // 并行查询（演示部署时每次查询都是一次 HTTP 请求）
++  const [requesterMapped, ...assigneeKeys] = await Promise.all(
++    [event.user, ...assigneeSlackIds].map((slackId) => getMeegleUserKey(slackId)),
++  );
++  assigneeSlackIds.forEach((slackId, i) => {
++    if (assigneeKeys[i]) assigneeUserKeys.push(assigneeKeys[i]);
+     else unmapped.push(slackId);
+-  }
++  });
+ 
+   // 2) 发起人身份：优先用他自己绑定的 user_key，未绑定则用服务账号
+-  const requesterKey = getMeegleUserKey(event.user) || process.env.MEEGLE_USER_KEY || '';
++  const requesterKey = requesterMapped || process.env.MEEGLE_USER_KEY || '';
+ 
+   const description = [
+     `由 Slack 创建：<@${event.user}>`,
+@@ -61,6 +65,7 @@ app.event('app_mention', async ({ event, client, context }) => {
+       requesterUserKey: requesterKey,
+     });
+ 
++    reportCard({ slackUserId: event.user, title, url: cardUrl(created.id) }); // 不等待，不影响回复
+     const lines = [`✅ 已创建卡片：<${cardUrl(created.id)}|${title}>`];
+     if (assigneeUserKeys.length && created.assignApplied) {
+       lines.push(`负责人：${assigneeSlackIds.map(slackMention).join(' ')}`);
+@@ -70,7 +75,9 @@ app.event('app_mention', async ({ event, client, context }) => {
+     if (unmapped.length) {
+       lines.push(
+         `⚠️ 以下同事还没绑定 Meegle 账号，未加入负责人：${unmapped.map(slackMention).join(' ')}\n` +
+-          '请各自执行 `/meegle-bind <你的 Meegle user_key>` 绑定一次（user_key 在 Meegle 里双击自己头像复制）。',
++          (isRemote
++            ? '请各自在 Workflow Deploy Demo 网站上点 “Activate for me” 绑定。'
++            : '请各自执行 `/meegle-bind <你的 Meegle user_key>` 绑定一次（user_key 在 Meegle 里双击自己头像复制）。'),
+       );
+     }
+     await reply(lines.join('\n'));
+@@ -85,6 +92,10 @@ app.event('app_mention', async ({ event, client, context }) => {
+ /** 自助绑定：/meegle-bind <user_key> */
+ app.command('/meegle-bind', async ({ command, ack, respond }) => {
+   await ack();
++  if (isRemote) {
++    await respond('这个演示里请在 Workflow Deploy Demo 网站上点 “Activate for me” 绑定 Meegle 账号。');
++    return;
++  }
+   const userKey = (command.text || '').trim();
+   if (!userKey) {
+     await respond('用法：`/meegle-bind <你的 Meegle user_key>`\nuser_key 获取方式：在 Meegle 里双击自己的头像复制。');
+diff --git a/src/userMap.js b/src/userMap.js
+index 752782b..23268e6 100644
+--- a/src/userMap.js
++++ b/src/userMap.js
+@@ -10,6 +10,27 @@ const path = require('path');
+ 
+ const FILE = process.env.USER_MAP_FILE || path.join(__dirname, '..', 'data', 'user-map.json');
+ 
++// Demo deployment: mappings live in the demo backend (set by "Activate for me"), not in a file.
++const USER_MAP_URL = (process.env.USER_MAP_URL || '').replace(/\/+$/, '');
++const BOT_API_TOKEN = process.env.BOT_API_TOKEN || '';
++const isRemote = Boolean(USER_MAP_URL);
++
++async function remoteUserKey(slackUserId) {
++  try {
++    const res = await fetch(`${USER_MAP_URL}/${encodeURIComponent(slackUserId)}`, {
++      headers: { authorization: `Bearer ${BOT_API_TOKEN}` },
++      signal: AbortSignal.timeout(25000), // allows for a cold-starting demo backend
++    });
++    if (res.status === 404) return '';
++    if (!res.ok) throw new Error(`HTTP ${res.status}`);
++    const body = await res.json();
++    return body && body.user_key ? String(body.user_key).trim() : '';
++  } catch (e) {
++    console.error('[userMap] demo user map lookup failed:', e.message);
++    return '';
++  }
++}
++
+ function load() {
+   try {
+     return JSON.parse(fs.readFileSync(FILE, 'utf8')) || {};
+@@ -23,8 +44,9 @@ function save(map) {
+   fs.writeFileSync(FILE, JSON.stringify(map, null, 2), 'utf8');
+ }
+ 
+-/** 取某个 Slack 用户绑定的 Meegle user_key，没有则返回空字符串 */
++/** 取某个 Slack 用户绑定的 Meegle user_key，没有则返回空字符串（USER_MAP_URL 时返回 Promise） */
+ function getMeegleUserKey(slackUserId) {
++  if (isRemote) return remoteUserKey(slackUserId);
+   const entry = load()[slackUserId];
+   return entry && entry.user_key ? String(entry.user_key).trim() : '';
+ }
+@@ -41,4 +63,4 @@ function bindUser(slackUserId, userKey, displayName) {
+   return map[slackUserId];
+ }
+ 
+-module.exports = { getMeegleUserKey, bindUser, load };
++module.exports = { getMeegleUserKey, bindUser, load, isRemote };

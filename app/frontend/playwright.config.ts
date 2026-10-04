@@ -28,6 +28,7 @@ export default defineConfig({
       ADMIN_PASSCODE: 'e2e-admin',
       SESSION_SECRET: 'e2e-secret',
       DATA_ENCRYPTION_KEY: 'ZTJlLWVuY3J5cHRpb24ta2V5LTAxMjM0NTY3ODlhYmM=',
+      BOT_API_TOKEN: 'e2e-bot-token',
       DEMO_FAKE_PLATFORMS: '1',
       COOKIE_SECURE: 'false',
       DATABASE_URL: `sqlite:///${database}`,

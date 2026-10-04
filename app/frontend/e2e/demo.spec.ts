@@ -71,6 +71,22 @@ test('shared bot is activated per user', async ({ page }) => {
   await page.getByRole('button', { name: 'Activate for me' }).click()
   await expect(page.getByTestId('status')).toHaveText('Active')
   await expect(page.getByRole('button', { name: 'Run now' })).toHaveCount(0)
+
+  // The bot (on Modal) looks the tester up and reports the card it created.
+  const connections: { connector: string; details: { slack_user_id?: string } }[] = await (
+    await page.request.get('/api/connections')
+  ).json()
+  const slackUserId = connections.find((c) => c.connector === 'slack')?.details.slack_user_id
+  const bot = { Authorization: 'Bearer e2e-bot-token' }
+  const lookup = await page.request.get(`/api/bot/user-map/${slackUserId}`, { headers: bot })
+  expect(await lookup.json()).toEqual({ user_key: 'carol_key' })
+  const card = await page.request.post('/api/bot/cards', {
+    headers: bot,
+    data: { slack_user_id: slackUserId, title: 'Fix login page error', url: 'https://meegle.com/demo/story/1' },
+  })
+  expect(await card.json()).toEqual({ recorded: true })
+  await page.reload()
+  await expect(page.getByTestId('runs')).toContainText('Created card “Fix login page error”')
   await page.getByRole('button', { name: 'Deactivate' }).click()
   await expect(page.getByTestId('status')).toHaveText('Stopped')
 })

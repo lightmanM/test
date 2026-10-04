@@ -100,3 +100,19 @@ class PlatformAdapter(Protocol):
     def run_now(self, ctx: DeployContext) -> RunStarted: ...
 
     def recent_runs(self, ctx: DeployContext, limit: int = 10) -> list[RunSummary]: ...
+
+
+def runs_from_refs(refs: dict[str, Any], limit: int = 10) -> list[RunSummary]:
+    """Runs kept in a deployment's refs (fake adapters, bot card events), newest first."""
+    runs = []
+    for r in (refs.get("runs") or [])[:limit]:
+        runs.append(
+            RunSummary(
+                id=str(r["id"]),
+                status=r.get("status", "success"),
+                started_at=datetime.fromisoformat(r["started_at"]) if r.get("started_at") else None,
+                finished_at=datetime.fromisoformat(r["finished_at"]) if r.get("finished_at") else None,
+                summary=r.get("summary"),
+            )
+        )
+    return runs

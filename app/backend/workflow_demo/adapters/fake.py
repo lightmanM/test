@@ -15,6 +15,7 @@ from workflow_demo.adapters.base import (
     DeployResult,
     RunStarted,
     RunSummary,
+    runs_from_refs,
 )
 from workflow_demo.catalog.models import Platform
 
@@ -37,6 +38,13 @@ class FakeAdapter:
 
     def deploy(self, ctx: DeployContext) -> DeployResult:
         refs: dict[str, Any] = {"fake_id": f"fake-{ctx.workflow.id}-{ctx.deployment_id}", "runs": []}
+        if ctx.workflow.modal and ctx.workflow.modal.shared_deployment:
+            # What the real bot adapter records, so /api/bot/* works in fake mode too.
+            slack = ctx.connections.get("slack")
+            user_key = ctx.connections.get("meegle_user_key")
+            refs["slack_user_id"] = slack.details.get("slack_user_id") if slack else None
+            refs["meegle_user_key"] = user_key.details.get("value") if user_key else None
+            refs["runs"] = list(ctx.previous_refs.get("runs") or [])
         if self.platform is Platform.MAKE and self._popup_url is not None and ctx.user_step_state:
             return DeployResult(
                 refs={**refs, "popup_url": self._popup_url(ctx.user_step_state)},
@@ -67,13 +75,4 @@ class FakeAdapter:
         )
 
     def recent_runs(self, ctx: DeployContext, limit: int = 10) -> list[RunSummary]:
-        return [
-            RunSummary(
-                id=r["id"],
-                status=r["status"],
-                started_at=datetime.fromisoformat(r["started_at"]),
-                finished_at=datetime.fromisoformat(r["finished_at"]) if r.get("finished_at") else None,
-                summary=r.get("summary"),
-            )
-            for r in ctx.refs.get("runs", [])[:limit]
-        ]
+        return runs_from_refs(ctx.refs, limit)
