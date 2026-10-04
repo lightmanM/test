@@ -52,14 +52,33 @@ def test_expired_and_abandoned_deployments_are_stopped(user, services):
     shift(services, "github-merge-slack", updated_at=utcnow() - ABANDONED_POPUP - timedelta(minutes=1))
     report = sweep(services)
     assert sorted(report.stopped) == [
-        "alice / github-merge-slack: platform popup not finished",
-        "alice / uptime-monitor: time limit reached",
+        "alice / github-merge-slack: The platform popup wasn't finished within an hour",
+        "alice / uptime-monitor: The demo time limit was reached",
     ]
     deps = deployments(services)
     assert deps["uptime-monitor"].status == "stopped" and deps["uptime-monitor"].expires_at is None
     assert deps["github-merge-slack"].status == "stopped"
     timeline = user.get("/api/workflows/uptime-monitor").json()["deployment"]["events"]
     assert timeline[-1]["message"] == "Stopped automatically after the demo time limit"
+    popup = user.get("/api/workflows/github-merge-slack").json()["deployment"]["events"]
+    assert popup[-1]["message"] == "Stopped because the platform popup wasn't finished"
+    assert sweep(services).stopped == []
+
+
+def test_failed_cleanup_isnt_retried_every_sweep(user, services):
+    from workflow_demo.adapters.base import AdapterError
+    from workflow_demo.catalog.models import Platform
+
+    user.post("/api/deployments/uptime-monitor", json={"settings": UPTIME})
+    shift(services, "uptime-monitor", expires_at=utcnow() - timedelta(seconds=1))
+
+    def broken(ctx):
+        raise AdapterError("n8n is down")
+
+    services.registry.get(Platform.N8N).undeploy = broken
+    assert len(sweep(services).stopped) == 1
+    dep = deployments(services)["uptime-monitor"]
+    assert dep.status == "failed" and dep.expires_at is None
     assert sweep(services).stopped == []
 
 
@@ -95,15 +114,28 @@ def test_sweeper_thread_runs_on_its_interval(services, monkeypatch):
     assert calls
 
 
-def test_one_platform_failing_doesnt_stop_the_sweep(user, services):
+def test_orphan_sweep_is_opt_in_and_isolates_platforms(user, services):
+    from workflow_demo.adapters.base import OrphanReport
     from workflow_demo.catalog.models import Platform
 
-    def broken(snapshots, older_than):
+    calls = []
+
+    def broken(snapshots, older_than, current):
+        calls.append(snapshots)
         raise RuntimeError("n8n down")
 
+    def fine(snapshots, older_than, current):
+        return OrphanReport(removed=["Make scenario 1 (alice)"], errors=["Make (bob): 429"])
+
     services.registry.get(Platform.N8N).sweep_orphans = broken
+    services.registry.get(Platform.MAKE).sweep_orphans = fine
     report = sweep(services)
-    assert report.errors == ["n8n: n8n down"]
+    assert not calls and report.orphan_sweep is False  # off unless ORPHAN_SWEEP is set
+
+    services.settings.orphan_sweep = True
+    report = sweep(services)
+    assert report.errors == ["n8n: n8n down", "Make (bob): 429"]
+    assert report.orphans_removed == ["Make scenario 1 (alice)"]
 
 
 # --------------------------------------------------------------------------- orphans
@@ -157,21 +189,49 @@ def test_n8n_orphans_are_removed(make_settings):
     )
     http = httpx.Client()
     adapter = N8nAdapter(make_settings(), N8nClient(N8N, "k", http), http)
-    snapshot = DeploymentSnapshot(
-        username="alice",
-        workflow=CATALOG.workflow("uptime-monitor"),
-        status="active",
-        refs={"workflow_id": "w-known", "credential_ids": ["c-known"]},
-    )
-    removed = adapter.sweep_orphans([snapshot], utcnow() - timedelta(hours=1))
-    assert removed == [
+    # A deployment of a workflow the catalog no longer has still protects its items.
+    retired = snapshot("alice", None, "active", {"workflow_id": "w-known", "credential_ids": ["c-known"]})
+    report = adapter.sweep_orphans([retired], utcnow() - timedelta(hours=1))
+    assert report.removed == [
         "n8n workflow [demo] Uptime · bob",
         "n8n credential demo · bob · uptime-monitor · slack",
     ]
+    assert report.errors == []
     assert deleted_workflow.called and deleted_credential.called
 
 
+@respx.mock
+def test_n8n_orphan_delete_failures_dont_stop_the_rest(make_settings):
+    old = (utcnow() - timedelta(hours=2)).isoformat()
+    respx.get(f"{N8N}/api/v1/workflows").mock(
+        return_value=httpx.Response(200, json={"data": [{"id": "w1", "name": "[demo] a", "createdAt": old}]})
+    )
+    respx.get(f"{N8N}/api/v1/credentials").mock(
+        return_value=httpx.Response(200, json={"data": [{"id": "c1", "name": "demo · a", "createdAt": old}]})
+    )
+    respx.delete(f"{N8N}/api/v1/workflows/w1").mock(
+        return_value=httpx.Response(500, json={"message": "boom"})
+    )
+    credential = respx.delete(f"{N8N}/api/v1/credentials/c1").mock(return_value=httpx.Response(200))
+    http = httpx.Client()
+    report = N8nAdapter(make_settings(), N8nClient(N8N, "k", http), http).sweep_orphans([], utcnow())
+    assert credential.called
+    assert report.removed == ["n8n credential demo · a"]
+    assert report.errors and "boom" in report.errors[0]
+
+
 BRIDGE = "https://us2.make.com/portal/api/bridge"
+
+
+def snapshot(username, workflow, status, refs, updated_at=None):
+    return DeploymentSnapshot(
+        username=username,
+        workflow_id=workflow.id if workflow else "retired-workflow",
+        workflow=workflow,
+        status=status,
+        refs=refs,
+        updated_at=updated_at or utcnow(),
+    )
 
 
 @respx.mock
@@ -190,10 +250,27 @@ def test_make_orphans_are_removed(make_settings):
         )
     )
     stray = respx.delete(f"{BRIDGE}/integrations/6").mock(return_value=httpx.Response(200, json={}))
-    active = DeploymentSnapshot("alice", CATALOG.workflow("github-merge-slack"), "active", {"scenario_id": 5})
-    in_flight = DeploymentSnapshot(
-        "bob", CATALOG.workflow("github-merge-slack"), "awaiting_user", {"flow_id": "f"}
-    )
-    other = DeploymentSnapshot("alice", CATALOG.workflow("uptime-monitor"), "active", {})
-    assert adapter.sweep_orphans([active, in_flight, other], utcnow()) == ["Make scenario 6 (alice)"]
+    make = CATALOG.workflow("github-merge-slack")
+    active = snapshot("alice", make, "active", {"scenario_id": 5})
+    in_flight = snapshot("bob", make, "awaiting_user", {"flow_id": "f"})
+    other = snapshot("alice", CATALOG.workflow("uptime-monitor"), "active", {})
+    report = adapter.sweep_orphans([active, in_flight, other], utcnow())
+    assert report.removed == ["Make scenario 6 (alice)"] and report.errors == []
     assert stray.called
+
+    # Re-checked right before deleting: a popup that just started protects the scenarios.
+    stray.reset()
+    started = snapshot("alice", make, "awaiting_user", {"flow_id": "f2"})
+    report = adapter.sweep_orphans([active], utcnow(), current=lambda username: [started])
+    assert report.removed == [] and not stray.called
+
+    # A failed delete is an error, not a removal.
+    respx.delete(f"{BRIDGE}/integrations/6").mock(return_value=httpx.Response(500, json={}))
+    report = adapter.sweep_orphans([active], utcnow())
+    assert report.removed == [] and "delete failed" in report.errors[0]
+
+    # Users without recent Make activity aren't listed at all.
+    listing = respx.get(f"{BRIDGE}/integrations/")
+    listing.reset()
+    stale = snapshot("carol", make, "stopped", {}, updated_at=utcnow() - timedelta(days=3))
+    assert adapter.sweep_orphans([stale], utcnow()).removed == [] and not listing.called

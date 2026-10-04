@@ -30,6 +30,7 @@ from workflow_demo.adapters.base import (
     DeploymentSnapshot,
     DeployResult,
     OAuthTokens,
+    OrphanReport,
     RunStarted,
     RunSummary,
     SecretReader,
@@ -305,26 +306,35 @@ class N8nAdapter:
 
     # ------------------------------------------------------------------ orphan sweep
 
-    def sweep_orphans(self, deployments: list[DeploymentSnapshot], older_than: datetime) -> list[str]:
+    def sweep_orphans(
+        self, deployments: list[DeploymentSnapshot], older_than: datetime, current=None
+    ) -> OrphanReport:
         """Delete demo workflows/credentials no deployment references (e.g. a job died mid-deploy).
 
         Only items named like the demo's and created before ``older_than`` (so an in-flight deploy,
-        whose IDs aren't saved yet, is never touched)."""
+        whose IDs aren't saved yet, is never touched). Each delete is independent."""
         known_workflows = {str(d.refs["workflow_id"]) for d in deployments if d.refs.get("workflow_id")}
         known_credentials = {str(c) for d in deployments for c in d.refs.get("credential_ids") or []}
-        removed = []
-        try:
-            for workflow in self._client.list_all("workflows"):
-                if self._orphan(workflow, WORKFLOW_PREFIX, known_workflows, older_than):
-                    self._client.delete_workflow(str(workflow["id"]))
-                    removed.append(f"n8n workflow {workflow.get('name')}")
-            for credential in self._client.list_all("credentials"):
-                if self._orphan(credential, CREDENTIAL_PREFIX, known_credentials, older_than):
-                    self._client.delete_credential(str(credential["id"]))
-                    removed.append(f"n8n credential {credential.get('name')}")
-        except N8nError as exc:
-            raise AdapterError(f"n8n orphan sweep stopped: {exc}") from None
-        return removed
+        report = OrphanReport()
+        for kind, prefix, known, delete in (
+            ("workflows", WORKFLOW_PREFIX, known_workflows, self._client.delete_workflow),
+            ("credentials", CREDENTIAL_PREFIX, known_credentials, self._client.delete_credential),
+        ):
+            try:
+                items = self._client.list_all(kind)
+            except N8nError as exc:
+                report.errors.append(f"listing n8n {kind}: {exc}")
+                continue
+            for item in items:
+                if not self._orphan(item, prefix, known, older_than):
+                    continue
+                try:
+                    delete(str(item["id"]))
+                except N8nError as exc:
+                    report.errors.append(f"n8n {kind[:-1]} {item.get('name')}: {exc}")
+                    continue
+                report.removed.append(f"n8n {kind[:-1]} {item.get('name')}")
+        return report
 
     @staticmethod
     def _orphan(item: dict[str, Any], prefix: str, known: set[str], older_than: datetime) -> bool:

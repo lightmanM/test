@@ -147,9 +147,13 @@ treat empty env values as unset (`env_ignore_empty`), so `.env.example` copies c
 ### P6 Lifecycle & admin
 Notes: `services/sweeper.py` — `sweep()` stops deployments past `expires_at` (active/failed) or stuck in
 `awaiting_user` for an hour, fails jobs queued/running for 30 min, and asks each adapter with `sweep_orphans()` to
-remove demo items nothing references (n8n: `[demo] …` workflows / `demo · …` credentials older than 1 h; Make:
-same-named scenarios in each user's Bridge sandbox unless that deployment is mid-flight). One platform's failure is
-reported, not fatal. A daemon thread runs it every `SWEEP_INTERVAL_SECONDS` (600; 0 = off); P7 adds a Modal cron for
+remove demo items nothing references — **only with `ORPHAN_SWEEP=true`**, set on the one hosted instance that owns
+the platform accounts (a local run with the same keys would otherwise delete the hosted demo's items). n8n: `[demo] …`
+workflows / `demo · …` credentials older than 1 h, each delete independent; refs of rows whose workflow left the
+catalog still count. Make: users with Make activity in the last 2 days, one listing each, re-checking the database
+right before each delete (a popup may have just started); failed deletes are reported as errors. Auto-stops carry
+their own messages (time limit vs. unfinished popup) and clear `expires_at`, so a failing clean-up isn't retried
+every sweep. The thread is joined on shutdown before the HTTP client closes. A daemon thread runs it every `SWEEP_INTERVAL_SECONDS` (600; 0 = off); P7 adds a Modal cron for
 when the web app scales to zero. `DEPLOYMENT_TTL_HOURS` accepts fractions for a live expiry test.
 `services/setup_check.py` — database, mode, Nango (key + slack/google integrations), encryption key, n8n (API key),
 Google client, LLM key (`/models`), reader (`/healthz`), Make Bridge and Slack bot (adapter availability), plus every
@@ -184,7 +188,7 @@ Admin page: setup check, "Run sweeper now", Stop per deployment.
 | 2026-10-04 | Leaked Meegle token removed from git history (2 commits rewritten; `main` now at e7c40dc). Owner to revoke the token in Meegle. |
 
 ## Session log
-- 2026-10-04: PR #7 (P5) merged. P6 implemented: 154 backend tests, 5 E2E (admin lifecycle).
+- 2026-10-04: PR #7 (P5) merged. P6 implemented and reviewed (10 findings fixed): 156 backend tests, 5 E2E (admin lifecycle).
 - 2026-10-04: PR #6 (P4) merged. P5 implemented and reviewed (10 findings fixed): 143 backend tests (Bridge client + adapter contract, API popup flow).
 - 2026-10-04: PR #5 (P3) merged. P4 implemented and reviewed (8 findings fixed): 127 backend tests, 3 bot Node tests, 5 E2E.
 - 2026-10-04: PR #4 (P2) merged. P3 implemented and reviewed (10 findings fixed): 117 backend tests (transform golden, adapter contract, API flow).

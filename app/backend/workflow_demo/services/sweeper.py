@@ -9,15 +9,16 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from workflow_demo.adapters.base import AdapterError, DeploymentSnapshot
+from workflow_demo.adapters.base import AdapterError, DeploymentSnapshot, OrphanReport
 from workflow_demo.catalog.models import Platform
-from workflow_demo.db import Deployment, utcnow
+from workflow_demo.db import Deployment, User, utcnow
 from workflow_demo.services.container import AppServices
-from workflow_demo.services.deployments import recover_stale_jobs, request_expire
+from workflow_demo.services.deployments import TIME_LIMIT, recover_stale_jobs, request_expire
 from workflow_demo.services.states import Status
 
 log = logging.getLogger(__name__)
@@ -25,6 +26,10 @@ log = logging.getLogger(__name__)
 ABANDONED_POPUP = timedelta(hours=1)  # awaiting_user this long → stop it
 STALE_JOB = timedelta(minutes=30)  # a queued/running job this old was lost
 ORPHAN_AGE = timedelta(hours=1)  # platform items younger than this may belong to an in-flight deploy
+POPUP_ABANDONED = (
+    "The platform popup wasn't finished within an hour",
+    "Stopped because the platform popup wasn't finished",
+)
 
 
 @dataclass
@@ -33,18 +38,37 @@ class SweepReport:
     recovered_jobs: int = 0
     orphans_removed: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    orphan_sweep: bool = False  # whether platform orphans were looked for (ORPHAN_SWEEP)
 
 
-def expiry_reason(dep: Deployment, now) -> str | None:
+def expiry_reason(dep: Deployment, now: datetime) -> tuple[str, str] | None:
     if dep.status in (Status.ACTIVE, Status.FAILED) and dep.expires_at is not None and dep.expires_at <= now:
-        return "time limit reached"
+        return TIME_LIMIT
     if dep.status == Status.AWAITING_USER and dep.updated_at <= now - ABANDONED_POPUP:
-        return "platform popup not finished"
+        return POPUP_ABANDONED
     return None
 
 
+def _snapshots(svc: AppServices, db: Session, username: str | None = None) -> list[DeploymentSnapshot]:
+    query = select(Deployment)
+    if username is not None:
+        query = query.join(User).where(User.username == username)
+    catalog = {w.id: w for w in svc.catalog.workflows}
+    return [
+        DeploymentSnapshot(
+            username=d.user.username,
+            workflow_id=d.workflow_id,
+            workflow=catalog.get(d.workflow_id),  # unknown workflows still protect their refs
+            status=d.status,
+            refs=dict(d.platform_refs or {}),
+            updated_at=d.updated_at,
+        )
+        for d in db.scalars(query).all()
+    ]
+
+
 def sweep(svc: AppServices) -> SweepReport:
-    report = SweepReport()
+    report = SweepReport(orphan_sweep=svc.settings.orphan_sweep)
     report.recovered_jobs = recover_stale_jobs(svc, older_than=STALE_JOB)
     now = utcnow()
     with svc.db.session() as db:
@@ -55,18 +79,23 @@ def sweep(svc: AppServices) -> SweepReport:
         ).all()
         for dep in candidates:
             reason = expiry_reason(dep, now)
-            if reason and request_expire(svc, db, dep):
-                report.stopped.append(f"{dep.user.username} / {dep.workflow_id}: {reason}")
-        snapshots = [
-            DeploymentSnapshot(
-                username=d.user.username,
-                workflow=svc.catalog.workflow(d.workflow_id),
-                status=d.status,
-                refs=dict(d.platform_refs or {}),
-            )
-            for d in db.scalars(select(Deployment)).all()
-            if d.workflow_id in {w.id for w in svc.catalog.workflows}
-        ]
+            if reason and request_expire(svc, db, dep, reason):
+                report.stopped.append(f"{dep.user.username} / {dep.workflow_id}: {reason[0]}")
+        snapshots = _snapshots(svc, db)
+    if svc.settings.orphan_sweep:
+        _sweep_orphans(svc, snapshots, now - ORPHAN_AGE, report)
+    if report.stopped or report.recovered_jobs or report.orphans_removed or report.errors:
+        log.info("sweep: %s", report)
+    return report
+
+
+def _sweep_orphans(
+    svc: AppServices, snapshots: list[DeploymentSnapshot], older_than: datetime, report: SweepReport
+) -> None:
+    def current(username: str) -> list[DeploymentSnapshot]:
+        with svc.db.session() as db:
+            return _snapshots(svc, db, username)
+
     for platform in Platform:
         try:
             adapter = svc.registry.get(platform)
@@ -76,13 +105,13 @@ def sweep(svc: AppServices) -> SweepReport:
         if sweep_orphans is None:
             continue
         try:
-            report.orphans_removed += sweep_orphans(snapshots, now - ORPHAN_AGE)
+            result: OrphanReport = sweep_orphans(snapshots, older_than, current=current)
         except Exception as exc:  # noqa: BLE001 - one platform's trouble mustn't stop the sweep
             log.warning("orphan sweep for %s failed", platform.value, exc_info=True)
             report.errors.append(f"{platform.value}: {exc}")
-    if report.stopped or report.recovered_jobs or report.orphans_removed or report.errors:
-        log.info("sweep: %s", report)
-    return report
+            continue
+        report.orphans_removed += result.removed
+        report.errors += result.errors
 
 
 class Sweeper:
@@ -97,8 +126,11 @@ class Sweeper:
     def start(self) -> None:
         self._thread.start()
 
-    def stop(self) -> None:
+    def stop(self, timeout: float = 30) -> None:
+        """Stop and wait for a sweep in progress (it uses the HTTP client closed after this)."""
         self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout)
 
     def _loop(self) -> None:
         while not self._stop.wait(self._interval):

@@ -127,6 +127,7 @@ export interface SweepReport {
   recovered_jobs: number
   orphans_removed: string[]
   errors: string[]
+  orphan_sweep: boolean
 }
 
 /** Refetch everything after a change that affects several views (connections, deployments). */

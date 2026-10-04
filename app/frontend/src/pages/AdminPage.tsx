@@ -141,7 +141,7 @@ function AdminTools() {
         </div>
         <p className="mt-2 text-xs text-slate-500">
           Runs every 10 minutes: stops deployments past their 24 h limit or with an unfinished popup, recovers lost
-          jobs and removes demo items on n8n and Make that no deployment uses.
+          jobs and (with ORPHAN_SWEEP on) removes demo items on n8n and Make that no deployment uses.
         </p>
         <ErrorNote error={sweep.error} />
         {sweep.data && <SweepResults report={sweep.data} />}
@@ -187,6 +187,9 @@ function SweepResults({ report }: { report: SweepReport }) {
   return (
     <ul className="mt-3 space-y-1 text-sm text-slate-700" data-testid="sweep-report">
       {lines.length ? lines.map((line) => <li key={line}>{line}</li>) : <li>Nothing to do.</li>}
+      {!report.orphan_sweep && (
+        <li className="text-xs text-slate-500">Platform orphan clean-up is off on this server (ORPHAN_SWEEP).</li>
+      )}
     </ul>
   )
 }

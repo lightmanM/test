@@ -236,16 +236,25 @@ def request_delete(
     return dep
 
 
-def request_expire(svc: AppServices, db: Session, dep: Deployment) -> bool:
-    """Stop a deployment that outlived the demo time limit. Returns False if it was busy."""
+TIME_LIMIT = ("The demo time limit was reached", "Stopped automatically after the demo time limit")
+
+
+def request_expire(
+    svc: AppServices, db: Session, dep: Deployment, reason: tuple[str, str] = TIME_LIMIT
+) -> bool:
+    """Stop a deployment automatically (time limit, abandoned popup). False if it was busy.
+
+    ``reason`` is the (requested, done) pair of timeline messages. The expiry time is cleared,
+    so a deployment whose platform clean-up fails isn't retried on every sweep."""
     if dep.status in BUSY or dep.status == Status.STOPPED:
         return False
     try:
         claim_status(db, dep, Status.STOPPING)
     except DeploymentError:
         return False
-    add_event(dep, "expiring", "The demo time limit was reached")
-    _queue_job(svc, db, dep, "expire")
+    dep.expires_at = None
+    add_event(dep, "expiring", reason[0])
+    _queue_job(svc, db, dep, "expire", {"message": reason[1]})
     return True
 
 
@@ -363,7 +372,7 @@ def _execute(svc: AppServices, db: Session, job: Job, dep: Deployment) -> None:
     set_status(dep, Status.STOPPED)
     dep.expires_at = None
     if job.kind == "expire":
-        add_event(dep, "expired", "Stopped automatically after the demo time limit")
+        add_event(dep, "expired", (job.payload or {}).get("message") or TIME_LIMIT[1])
     else:
         add_event(dep, "stopped", "Deployment deleted")
 

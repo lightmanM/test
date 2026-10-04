@@ -37,7 +37,13 @@ def test_setup_check_in_fake_mode(admin):
 
 def test_sweep_now(admin):
     report = admin.post("/api/admin/sweep").json()
-    assert report == {"stopped": [], "recovered_jobs": 0, "orphans_removed": [], "errors": []}
+    assert report == {
+        "stopped": [],
+        "recovered_jobs": 0,
+        "orphans_removed": [],
+        "errors": [],
+        "orphan_sweep": False,
+    }
 
 
 def test_stop_a_testers_deployment(admin):
