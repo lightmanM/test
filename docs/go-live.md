@@ -57,8 +57,9 @@ N8N_OWNER_EMAIL=<you> python3 deploy/aws/setup_n8n.py         # n8n owner + API 
 deploy/aws/deploy.sh                                          # the demo picks up N8N_API_KEY
 ```
 
-Run `setup_n8n.py` from the machine that ran `deploy.sh`: Caddy accepts n8n's owner sign-up only from
-that IP, so nobody else can claim the fresh instance. The bot is deployed whenever
+Run `setup_n8n.py` from the machine that ran `deploy.sh`: Caddy lets only that IP reach n8n's public
+address at all, so nobody else can claim the fresh instance (testers never need it; the demo talks to
+n8n inside the server). The bot is deployed whenever
 `deploy/aws/bot.env` exists — create it only once no other copy of the bot runs anywhere
 (`deploy.sh --without-bot` stops it again).
 
@@ -111,7 +112,8 @@ docker compose exec -T postgres pg_dumpall -U postgres > backup.sql   # database
   without them saved Meegle tokens and n8n credentials are unreadable. Never run `docker compose down -v`
   (it deletes the database volumes).
 - **Upgrade n8n**: `N8N_VERSION` in `deploy/aws/.env` (the runner follows), then deploy.
-- **n8n editor**: `https://<N8N_HOST>`, owner login in `deploy/aws/n8n-owner.env`.
+- **n8n editor**: `https://<N8N_HOST>`, owner login in `deploy/aws/n8n-owner.env`. Reachable only from the IP
+  that last ran `deploy.sh` (everyone else gets 403); after your IP changes, run `deploy.sh` again.
 - **Certificates**: sslip.io names share Let's Encrypt's per-domain limits; if a fresh server can't get
   a certificate, point a DNS name (e.g. in Cloudflare) at the Elastic IP and use it as `DEMO_HOST`/`N8N_HOST`.
 - **Pause costs**: `aws ec2 stop-instances --profile pond-new --region us-west-2 --instance-ids <id>`;

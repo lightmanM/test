@@ -18,7 +18,10 @@ services:
     environment:
       DEMO_HOST: ${DEMO_HOST:?set DEMO_HOST in deploy/aws/.env}
       N8N_HOST: ${N8N_HOST:?set N8N_HOST in deploy/aws/.env}
-      ADMIN_IP: ${ADMIN_IP:-127.0.0.1}  # set by deploy.sh: the only IP allowed to create n8n's owner
+      ADMIN_IP: ${ADMIN_IP:-127.0.0.1}  # set by deploy.sh: the only IP that may reach the n8n editor
+      # Set by up.sh. The Caddyfile is a single-file mount that rsync replaces, so a change must
+      # recreate the container to take effect; a new hash makes compose do that.
+      CADDYFILE_HASH: ${CADDYFILE_HASH:-unset}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
