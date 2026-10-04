@@ -3,16 +3,16 @@
 Living document. Update at the end of every work session and every PR.
 
 ## Current status
-- **Phase**: P0 Foundations — in review.
-- **Next step**: merge the P0 PR, then start P1a (backend core).
+- **Phase**: P1a Backend core — in review.
+- **Next step**: merge the P1a PR, then start P1b (frontend).
 - **Blocked on owner**: nothing until P7 (credentials). See plan §15.
 
 ## Phases and PRs
 
 | Phase | PR | Status | Notes |
 |---|---|---|---|
-| P0 Foundations | [#1](https://github.com/lightmanM/test/pull/1) | in review | repo layout, tooling, CI, catalog + fixed templates, SDK compile, setup guide |
-| P1a Backend core | — | not started | auth, DB, catalog API, state machine, fake adapters |
+| P0 Foundations | [#1](https://github.com/lightmanM/test/pull/1) | merged | repo layout, tooling, CI, catalog + fixed templates, SDK compile, setup guide |
+| P1a Backend core | [#2](https://github.com/lightmanM/test/pull/2) | in review | auth, DB, catalog API, state machine, fake adapters |
 | P1b Frontend | — | not started | sign-in, catalog, workflow page, admin shell |
 | P2 Connections | — | not started | Nango connect + manual secrets |
 | P3 n8n | — | not started | adapter, 3 transforms, shared credentials, Run now, results |
@@ -40,10 +40,19 @@ targets in one place (`catalog/build.py`); CI recompiles the Meegle SDK source t
 - [x] `docs/setup-guide.md`: Slack app manifests (connect + bot), Google Internal OAuth client steps, Nango integrations, Make Bridge template steps, Modal, Neon
 
 ### P1a Backend core
-- [ ] FastAPI app, settings, Postgres models + Alembic migration
-- [ ] Sign-in (username + passcode, 10-user cap, cookie session); admin passcode
-- [ ] Catalog API; deployment state machine + events; fake adapters
-- [ ] Unit tests
+Notes: `create_app()` in `workflow_demo/app.py`; services container (`services/container.py`), lifecycle in
+`services/deployments.py` (request → `Job` row → runner → adapter), states in `services/states.py`. Fake adapters
+(`adapters/fake.py`) include a fake Make popup (`/fake/make-popup` → `/make/callback`). Fake-mode connect:
+`POST /api/connections/{id}/fake` (real flows in P2). Local run: `python -m workflow_demo` with `.env.example`.
+Review fixes: status changes claimed with conditional UPDATEs (no double jobs); jobs only run in the expected
+state; `recover_stale_jobs` (startup now, sweeper in P6); `request_expire` for P6; popup state carries a one-time
+nonce per deploy attempt (`DeployContext.user_step_state` / `callback_url`); new settings travel in `Job.payload`
+so undeploy uses the old ones; Alembic reads `.env`; Postgres URLs normalized to psycopg 3; login race/cap
+handled; session cookie also checks the username.
+- [x] FastAPI app, settings, Postgres models + Alembic migration
+- [x] Sign-in (username + passcode, 10-user cap, cookie session); admin passcode
+- [x] Catalog API; deployment state machine + events; fake adapters
+- [x] Unit tests
 
 ### P1b Frontend
 - [ ] Sign-in, catalog, workflow page (connect / settings / deploy / try), admin shell
@@ -98,5 +107,6 @@ targets in one place (`catalog/build.py`); CI recompiles the Meegle SDK source t
 | 2026-10-04 | Leaked Meegle token removed from git history (2 commits rewritten; `main` now at e7c40dc). Owner to revoke the token in Meegle. |
 
 ## Session log
+- 2026-10-04: PR #1 (P0) reviewed, fixed, CI green, merged. P1a implemented, reviewed (10 findings fixed): 69 tests passing.
 - 2026-10-04: P0 implemented (catalog, template fixes, compile script, setup guide, CI); 20 tests passing.
 - 2026-10-03/04: feasibility research (n8n, Make, Zapier, Dify, Nango, Modal), evaluated all 5 workflows, cleaned leaked token from history, wrote `docs/implementation-plan.md`, added this tracker, `CLAUDE.md` and `docs/research-notes.md`.

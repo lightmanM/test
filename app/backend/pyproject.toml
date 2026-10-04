@@ -5,7 +5,15 @@ description = "Workflow deploy demo backend"
 requires-python = ">=3.11"
 dependencies = [
   "pydantic>=2.7",
+  "pydantic-settings>=2.3",
   "pyyaml>=6.0",
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "sqlalchemy>=2.0.30",
+  "alembic>=1.13",
+  "itsdangerous>=2.2",
+  "httpx>=0.27",
+  "psycopg[binary]>=3.2",
 ]
 
 [project.optional-dependencies]
@@ -27,6 +35,8 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = ["SIM102"]  # nested ifs read better in long elif chains
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient` is deprecated"]
