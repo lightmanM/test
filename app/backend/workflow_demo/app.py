@@ -23,6 +23,7 @@ from workflow_demo.security import Signer
 from workflow_demo.services import deployments as svc_deployments
 from workflow_demo.services.container import AppServices
 from workflow_demo.services.jobs import ThreadJobRunner
+from workflow_demo.services.sweeper import Sweeper
 
 log = logging.getLogger(__name__)
 
@@ -66,7 +67,11 @@ def create_app(settings: Settings | None = None, services: AppServices | None = 
     async def lifespan(_: FastAPI):
         if svc.settings.recover_jobs_on_startup:
             svc_deployments.recover_stale_jobs(svc, older_than=timedelta(0))
+        sweeper = Sweeper(svc, svc.settings.sweep_interval_seconds)
+        if svc.settings.sweep_interval_seconds > 0:
+            sweeper.start()
         yield
+        sweeper.stop()
         svc.http.close()
 
     app = FastAPI(

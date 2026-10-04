@@ -1,6 +1,8 @@
-"""Admin sign-in and overview (more actions in P6)."""
+"""Admin: sign-in, overview, setup check, sweeper, stopping a tester's deployment."""
 
 from __future__ import annotations
+
+from dataclasses import asdict
 
 from fastapi import APIRouter, HTTPException, Response
 from sqlalchemy import select
@@ -9,6 +11,10 @@ from workflow_demo.api.deps import DB, Admin, Services
 from workflow_demo.api.schemas import AdminLoginRequest
 from workflow_demo.db import User
 from workflow_demo.security import ADMIN_COOKIE, passcode_matches
+from workflow_demo.services import deployments as svc_deployments
+from workflow_demo.services.deployments import DeploymentError
+from workflow_demo.services.setup_check import run_checks
+from workflow_demo.services.sweeper import sweep
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -57,3 +63,25 @@ def overview(svc: Services, db: DB) -> dict:
             for u in users
         ],
     }
+
+
+@router.get("/setup", dependencies=[Admin])
+def setup_check(svc: Services) -> dict:
+    return run_checks(svc)
+
+
+@router.post("/sweep", dependencies=[Admin])
+def run_sweep(svc: Services) -> dict:
+    return asdict(sweep(svc))
+
+
+@router.post("/users/{username}/deployments/{workflow_id}/stop", status_code=202, dependencies=[Admin])
+def stop_deployment(username: str, workflow_id: str, svc: Services, db: DB) -> dict:
+    user = db.scalar(select(User).where(User.username == username))
+    if user is None:
+        raise HTTPException(404, "Unknown user")
+    try:
+        dep = svc_deployments.request_delete(svc, db, user, workflow_id, reason="Stopped by the admin")
+    except DeploymentError as exc:
+        raise HTTPException(exc.status_code, exc.message) from None
+    return {"status": dep.status}

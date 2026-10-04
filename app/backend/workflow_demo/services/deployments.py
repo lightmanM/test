@@ -219,7 +219,9 @@ def request_deploy(
     return dep
 
 
-def request_delete(svc: AppServices, db: Session, user: User, workflow_id: str) -> Deployment:
+def request_delete(
+    svc: AppServices, db: Session, user: User, workflow_id: str, *, reason: str = "Delete requested"
+) -> Deployment:
     workflow_entry(svc, workflow_id)
     dep = get_deployment(db, user, workflow_id)
     if dep is None:
@@ -229,7 +231,7 @@ def request_delete(svc: AppServices, db: Session, user: User, workflow_id: str) 
     if dep.status in BUSY:
         raise DeploymentError("This deployment is busy; wait for the current step to finish")
     claim_status(db, dep, Status.STOPPING)
-    add_event(dep, "requested", "Delete requested")
+    add_event(dep, "requested", reason)
     _queue_job(svc, db, dep, "undeploy")
     return dep
 

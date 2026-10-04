@@ -70,6 +70,14 @@ class NangoClient:
         except ValueError:
             raise NangoError("Nango returned a response that isn't JSON") from None
 
+    def integration_keys(self) -> set[str]:
+        """Keys of the integrations configured in Nango (setup check)."""
+        data = self._request("GET", "/integrations")
+        items = data.get("data", data.get("configs")) if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            raise NangoError("Nango returned an unexpected integration list")
+        return {str(i.get("unique_key") or i.get("id")) for i in items if isinstance(i, dict)}
+
     def create_connect_session(self, integration: str, tags: dict[str, str]) -> ConnectSession:
         data = self._request(
             "POST", "/connect/sessions", json={"tags": tags, "allowed_integrations": [integration]}
