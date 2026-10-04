@@ -20,6 +20,7 @@ from workflow_demo.adapters.base import (
     AdapterError,
     Availability,
     DeployContext,
+    DeploymentSnapshot,
     DeployResult,
     RunStarted,
     RunSummary,
@@ -36,6 +37,7 @@ RETRY_TTL = 60  # after an error that may go away (network, credentials being fi
 FINISH_DELAYS = (1, 2, 3, 5, 5, 8, 8, 13, 13, 21, 21, 21)
 REQUIRED = ("make_bridge_key_id", "make_bridge_secret", "make_bridge_template_id")
 LOG_STATUS = {1: "success", 2: "success", 3: "error"}  # 2 = finished with warnings
+IN_FLIGHT = {"deploying", "redeploying", "awaiting_user", "stopping"}
 
 
 def subject(username: str) -> str:
@@ -209,20 +211,30 @@ class MakeBridgeAdapter:
     def _remove_strays(self, bridge: BridgeClient, user: str, name: str, keep: set[int]) -> None:
         """Best effort: delete this user's scenarios for this workflow that the demo doesn't track."""
         try:
-            integrations = bridge.integrations(user)
-        except BridgeError:
+            found = self._stray_ids(bridge, user, name)
+        except AdapterError:
             log.warning("couldn't list Make integrations for cleanup", exc_info=True)
             return
+        for stray in found - keep:
+            self._delete_quietly(bridge, user, stray)
+
+    @staticmethod
+    def _stray_ids(bridge: BridgeClient, user: str, name: str) -> set[int]:
+        """IDs of this user's scenarios with the demo's name for the workflow."""
+        try:
+            integrations = bridge.integrations(user)
+        except BridgeError as exc:
+            raise AdapterError(f"Couldn't list Make integrations: {exc}") from None
+        found = set()
         for item in integrations:
             scenario = item.get("scenario") if isinstance(item, dict) else None
             if not isinstance(scenario, dict) or scenario.get("name") != name:
                 continue
             try:
-                stray = int(scenario["id"])
+                found.add(int(scenario["id"]))
             except (KeyError, TypeError, ValueError):
                 continue
-            if stray not in keep:
-                self._delete_quietly(bridge, user, stray)
+        return found
 
     @staticmethod
     def _delete_quietly(bridge: BridgeClient, user: str, scenario_id: int) -> None:
@@ -230,6 +242,26 @@ class MakeBridgeAdapter:
             bridge.delete(user, scenario_id)
         except BridgeError:
             log.warning("couldn't delete Make scenario %s", scenario_id, exc_info=True)
+
+    # ------------------------------------------------------------------ orphan sweep
+
+    def sweep_orphans(self, deployments: list[DeploymentSnapshot], older_than: datetime) -> list[str]:
+        """Delete demo scenarios in each user's Bridge sandbox that their deployment doesn't track.
+
+        Users whose deployment is mid-flight (popup open, finishing, redeploying) are skipped."""
+        if self._client is None:
+            return []
+        removed = []
+        for dep in deployments:
+            if dep.workflow.platform is not Platform.MAKE or dep.status in IN_FLIGHT:
+                continue
+            user = subject(dep.username)
+            keep = {int(dep.refs["scenario_id"])} if dep.refs.get("scenario_id") else set()
+            found = self._stray_ids(self._client, user, scenario_name(dep.workflow, dep.username))
+            for stray in found - keep:
+                self._delete_quietly(self._client, user, stray)
+                removed.append(f"Make scenario {stray} ({dep.username})")
+        return removed
 
     # ------------------------------------------------------------------ runs
 

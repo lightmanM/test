@@ -3,8 +3,8 @@
 Living document. Update at the end of every work session and every PR.
 
 ## Current status
-- **Phase**: P5 Make Bridge — in review.
-- **Next step**: merge the P5 PR, then start P6 (lifecycle sweeper, admin, setup check).
+- **Phase**: P6 Lifecycle & admin — in review.
+- **Next step**: merge the P6 PR, then P7 (go live) once the owner provides credentials (plan §15).
 - **Blocked on owner**: nothing until P7 (credentials). See plan §15.
 
 ## Phases and PRs
@@ -17,8 +17,8 @@ Living document. Update at the end of every work session and every PR.
 | P2 Connections | [#4](https://github.com/lightmanM/test/pull/4) | merged | Nango connect + manual secrets |
 | P3 n8n | [#5](https://github.com/lightmanM/test/pull/5) | merged | adapter, 3 transforms, per-deployment credentials, Run now, results |
 | P4 Modal services | [#6](https://github.com/lightmanM/test/pull/6) | merged | reader + bot on Modal, bot patches, "Activate for me" |
-| P5 Make Bridge | #7 | in review | Bridge adapter, popup + callback, unavailable state |
-| P6 Lifecycle & admin | — | not started | 24 h sweeper, redeploy/delete, admin page, setup check, E2E |
+| P5 Make Bridge | [#7](https://github.com/lightmanM/test/pull/7) | merged | Bridge adapter, popup + callback, unavailable state |
+| P6 Lifecycle & admin | #8 | in review | 24 h sweeper, redeploy/delete, admin page, setup check, E2E |
 | P7 Go live | — | not started | Modal + Neon deploy, owner credentials, live checklist |
 
 ## Phase checklists
@@ -145,11 +145,21 @@ treat empty env values as unset (`env_ignore_empty`), so `.env.example` copies c
 - [x] `catalog/github-merge-slack/make-setup.md` (JWT details, redirect URL, settings)
 
 ### P6 Lifecycle & admin
-- [ ] Sweeper: 24 h expiry, status reconcile
-- [ ] Orphan sweep: n8n workflows/credentials named `demo · …` / `[demo] …` that no deployment references
-  (left if a job process dies mid-deploy, since refs are saved only when `deploy()` returns)
-- [ ] Redeploy / delete hardening; admin page; setup check
-- [ ] E2E lifecycle tests
+Notes: `services/sweeper.py` — `sweep()` stops deployments past `expires_at` (active/failed) or stuck in
+`awaiting_user` for an hour, fails jobs queued/running for 30 min, and asks each adapter with `sweep_orphans()` to
+remove demo items nothing references (n8n: `[demo] …` workflows / `demo · …` credentials older than 1 h; Make:
+same-named scenarios in each user's Bridge sandbox unless that deployment is mid-flight). One platform's failure is
+reported, not fatal. A daemon thread runs it every `SWEEP_INTERVAL_SECONDS` (600; 0 = off); P7 adds a Modal cron for
+when the web app scales to zero. `DEPLOYMENT_TTL_HOURS` accepts fractions for a live expiry test.
+`services/setup_check.py` — database, mode, Nango (key + slack/google integrations), encryption key, n8n (API key),
+Google client, LLM key (`/models`), reader (`/healthz`), Make Bridge and Slack bot (adapter availability), plus every
+workflow's availability; states ok / missing / error / info. Admin API: `GET /api/admin/setup`,
+`POST /api/admin/sweep`, `POST /api/admin/users/{user}/deployments/{workflow}/stop` ("Stopped by the admin").
+Admin page: setup check, "Run sweeper now", Stop per deployment.
+- [x] Sweeper: 24 h expiry, abandoned popups, lost jobs
+- [x] Orphan sweep: n8n workflows/credentials and Make scenarios that no deployment references
+- [x] Admin page: setup check, sweep now, stop a deployment
+- [x] E2E: admin setup check, sweeper, stop
 
 ### P7 Go live
 - [ ] Deploy demo + services to Modal; Neon migration
@@ -174,6 +184,7 @@ treat empty env values as unset (`env_ignore_empty`), so `.env.example` copies c
 | 2026-10-04 | Leaked Meegle token removed from git history (2 commits rewritten; `main` now at e7c40dc). Owner to revoke the token in Meegle. |
 
 ## Session log
+- 2026-10-04: PR #7 (P5) merged. P6 implemented: 154 backend tests, 5 E2E (admin lifecycle).
 - 2026-10-04: PR #6 (P4) merged. P5 implemented and reviewed (10 findings fixed): 143 backend tests (Bridge client + adapter contract, API popup flow).
 - 2026-10-04: PR #5 (P3) merged. P4 implemented and reviewed (8 findings fixed): 127 backend tests, 3 bot Node tests, 5 E2E.
 - 2026-10-04: PR #4 (P2) merged. P3 implemented and reviewed (10 findings fixed): 117 backend tests (transform golden, adapter contract, API flow).

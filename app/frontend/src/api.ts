@@ -117,6 +117,18 @@ export interface AdminOverview {
   }[]
 }
 
+export interface SetupCheck {
+  checks: { name: string; state: 'ok' | 'missing' | 'error' | 'info'; detail: string }[]
+  workflows: { id: string; name: string; platform: Platform; available: boolean; reason: string | null }[]
+}
+
+export interface SweepReport {
+  stopped: string[]
+  recovered_jobs: number
+  orphans_removed: string[]
+  errors: string[]
+}
+
 /** Refetch everything after a change that affects several views (connections, deployments). */
 export function refreshAll(queryClient: { invalidateQueries: () => Promise<unknown> }) {
   return queryClient.invalidateQueries()
@@ -178,6 +190,13 @@ export const api = {
   adminLogin: (passcode: string) => request<void>('POST', '/api/admin/login', { passcode }),
   adminLogout: () => request<void>('POST', '/api/admin/logout'),
   adminOverview: () => request<AdminOverview>('GET', '/api/admin/overview'),
+  adminSetup: () => request<SetupCheck>('GET', '/api/admin/setup'),
+  adminSweep: () => request<SweepReport>('POST', '/api/admin/sweep'),
+  adminStop: (username: string, workflowId: string) =>
+    request<{ status: DeploymentStatus }>(
+      'POST',
+      `/api/admin/users/${encodeURIComponent(username)}/deployments/${encodeURIComponent(workflowId)}/stop`,
+    ),
 }
 
 export const BUSY: DeploymentStatus[] = ['deploying', 'redeploying', 'stopping']

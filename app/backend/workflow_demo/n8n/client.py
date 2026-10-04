@@ -44,6 +44,10 @@ class N8nClient:
             return str(data["id"])
         raise N8nError(f"n8n returned an unexpected {what}")
 
+    def ping(self) -> None:
+        """Any successful authenticated call (setup check)."""
+        self._request("GET", "/workflows", params={"limit": 1})
+
     # ------------------------------------------------------------------ credentials
 
     def create_credential(self, name: str, credential_type: str, data: dict[str, Any]) -> str:
@@ -89,6 +93,26 @@ class N8nClient:
         if not isinstance(data, dict):
             raise N8nError("n8n returned an unexpected execution")
         return data
+
+    # ------------------------------------------------------------------ listing (orphan sweep)
+
+    def list_all(self, kind: str, *, max_pages: int = 20) -> list[dict[str, Any]]:
+        """Every workflow or credential (``kind`` = "workflows" / "credentials"), following cursors."""
+        items: list[dict[str, Any]] = []
+        cursor = None
+        for _ in range(max_pages):
+            params: dict[str, Any] = {"limit": 250}
+            if cursor:
+                params["cursor"] = cursor
+            data = self._request("GET", f"/{kind}", params=params)
+            page = data.get("data") if isinstance(data, dict) else None
+            if not isinstance(page, list):
+                raise N8nError(f"n8n returned an unexpected {kind} list")
+            items += [item for item in page if isinstance(item, dict)]
+            cursor = data.get("nextCursor")
+            if not cursor:
+                break
+        return items
 
     # ------------------------------------------------------------------ webhooks
 

@@ -29,7 +29,8 @@ class Settings(BaseSettings):
     admin_session_hours: int = 12
 
     # Deployments
-    deployment_ttl_hours: int = 24
+    deployment_ttl_hours: float = 24  # a fraction (e.g. 0.05) is handy for a live expiry test
+    sweep_interval_seconds: int = 600  # 0 turns the background sweeper off
     fake_platforms: bool = Field(default=False, validation_alias="DEMO_FAKE_PLATFORMS")
     # Jobs run inside this process, so on startup any unfinished job was lost: fail it.
     recover_jobs_on_startup: bool = True

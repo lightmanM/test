@@ -55,6 +55,16 @@ class DeployContext:
 
 
 @dataclass(frozen=True)
+class DeploymentSnapshot:
+    """What the orphan sweep knows about one deployment row (any status)."""
+
+    username: str
+    workflow: WorkflowEntry
+    status: str
+    refs: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class Availability:
     available: bool
     reason: str | None = None

@@ -27,6 +27,7 @@ from workflow_demo.adapters.base import (
     AdapterError,
     Availability,
     DeployContext,
+    DeploymentSnapshot,
     DeployResult,
     OAuthTokens,
     RunStarted,
@@ -82,6 +83,10 @@ GOOGLE_NEEDS = ("google_client_id", "google_client_secret")
 DEPLOY_VALUES = {"spreadsheet_id"}
 # Header each manual secret is sent in (the template's HTTP nodes use an httpHeaderAuth slot).
 SECRET_HEADERS = {"meegle_mcp_token": "X-Mcp-Token"}
+
+# Names of everything the demo creates in n8n (the orphan sweep only touches these).
+WORKFLOW_PREFIX = "[demo] "
+CREDENTIAL_PREFIX = "demo · "
 
 STATUS = {
     "success": "success",
@@ -189,7 +194,7 @@ class N8nAdapter:
         spec = entry.n8n
         secrets = _CachedSecrets(self._secrets(ctx))
         created = _Created()
-        prefix = f"demo · {ctx.username} · {entry.id}"
+        prefix = f"{CREDENTIAL_PREFIX}{ctx.username} · {entry.id}"
         sheet: dict[str, str] = {}
         try:
             values = {}
@@ -218,7 +223,7 @@ class N8nAdapter:
                 hook = RunHook(path=path, credential=run_credential)
             workflow = build_workflow(
                 load_template(entry),
-                name=f"[demo] {entry.name} · {ctx.username}",
+                name=f"{WORKFLOW_PREFIX}{entry.name} · {ctx.username}",
                 values=values,
                 credentials=credentials,
                 run_hook=hook,
@@ -297,6 +302,40 @@ class N8nAdapter:
             while len(self._summaries) > 500:
                 self._summaries.popitem(last=False)
         return summary
+
+    # ------------------------------------------------------------------ orphan sweep
+
+    def sweep_orphans(self, deployments: list[DeploymentSnapshot], older_than: datetime) -> list[str]:
+        """Delete demo workflows/credentials no deployment references (e.g. a job died mid-deploy).
+
+        Only items named like the demo's and created before ``older_than`` (so an in-flight deploy,
+        whose IDs aren't saved yet, is never touched)."""
+        known_workflows = {str(d.refs["workflow_id"]) for d in deployments if d.refs.get("workflow_id")}
+        known_credentials = {str(c) for d in deployments for c in d.refs.get("credential_ids") or []}
+        removed = []
+        try:
+            for workflow in self._client.list_all("workflows"):
+                if self._orphan(workflow, WORKFLOW_PREFIX, known_workflows, older_than):
+                    self._client.delete_workflow(str(workflow["id"]))
+                    removed.append(f"n8n workflow {workflow.get('name')}")
+            for credential in self._client.list_all("credentials"):
+                if self._orphan(credential, CREDENTIAL_PREFIX, known_credentials, older_than):
+                    self._client.delete_credential(str(credential["id"]))
+                    removed.append(f"n8n credential {credential.get('name')}")
+        except N8nError as exc:
+            raise AdapterError(f"n8n orphan sweep stopped: {exc}") from None
+        return removed
+
+    @staticmethod
+    def _orphan(item: dict[str, Any], prefix: str, known: set[str], older_than: datetime) -> bool:
+        created = _parse_time(item.get("createdAt"))
+        return (
+            str(item.get("name") or "").startswith(prefix)
+            and item.get("id") is not None
+            and str(item["id"]) not in known
+            and created is not None
+            and created < older_than
+        )
 
     # ------------------------------------------------------------------ helpers
 
