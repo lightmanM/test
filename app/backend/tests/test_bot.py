@@ -139,3 +139,39 @@ def test_shared_bot_adapter_needs_the_token(make_settings):
     assert not availability.available and "BOT_API_TOKEN" in availability.reason
     with pytest.raises(AdapterError, match="BOT_API_TOKEN"):
         adapter.deploy(bot_context())
+
+
+def test_mapping_follows_expiry_and_connections(bot_client):
+    from datetime import timedelta
+
+    from workflow_demo.db import Deployment, utcnow
+
+    activate(bot_client)
+    # A corrected user key applies without activating again.
+    bot_client.put("/api/connections/meegle_user_key/secret", json={"value": "carol_new"})
+    assert bot_client.get("/api/bot/user-map/UFAKE0001", headers=BOT).json() == {"user_key": "carol_new"}
+    # Disconnecting Slack (or Meegle) ends the mapping at once.
+    bot_client.delete("/api/connections/slack")
+    assert bot_client.get("/api/bot/user-map/UFAKE0001", headers=BOT).status_code == 404
+    bot_client.post("/api/connections/slack/fake")
+    assert bot_client.get("/api/bot/user-map/UFAKE0001", headers=BOT).status_code == 200
+    bot_client.delete("/api/connections/meegle_user_key")
+    assert bot_client.get("/api/bot/user-map/UFAKE0001", headers=BOT).status_code == 404
+    bot_client.put("/api/connections/meegle_user_key/secret", json={"value": "carol_key"})
+
+    # Past its expiry time, even before the sweeper runs.
+    svc = bot_client.app.state.services
+    with svc.db.session() as db:
+        db.query(Deployment).one().expires_at = utcnow() - timedelta(minutes=1)
+        db.commit()
+    assert bot_client.get("/api/bot/user-map/UFAKE0001", headers=BOT).status_code == 404
+    card = {"slack_user_id": "UFAKE0001", "title": "Late", "url": "https://meegle.com/x/2"}
+    assert bot_client.post("/api/bot/cards", json=card, headers=BOT).json() == {"recorded": False}
+
+
+def test_long_titles_are_shortened(bot_client):
+    activate(bot_client)
+    card = {"slack_user_id": "UFAKE0001", "title": "x" * 1000, "url": "https://meegle.com/x/3"}
+    assert bot_client.post("/api/bot/cards", json=card, headers=BOT).json() == {"recorded": True}
+    summary = bot_client.get("/api/deployments/slack-meegle-bot/runs").json()[0]["summary"]
+    assert "x" * 199 + "…”" in summary and "x" * 200 not in summary

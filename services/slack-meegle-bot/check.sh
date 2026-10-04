@@ -8,4 +8,7 @@ trap 'rm -rf "$work"' EXIT
 cp -r "$repo/demo-project/slark-meegle-bot/src" "$work/"
 (cd "$work" && patch -p1 --quiet --no-backup-if-mismatch < "$here/demo.patch")
 for file in "$work"/src/*.js; do node --check "$file"; done
+# Stand-in for @slack/bolt so index.js can be loaded without installing dependencies.
+mkdir -p "$work/node_modules/@slack/bolt"
+cp "$here/test/stubs/bolt.js" "$work/node_modules/@slack/bolt/index.js"
 BOT_DIR="$work" node --test "$here"/test/*.test.js

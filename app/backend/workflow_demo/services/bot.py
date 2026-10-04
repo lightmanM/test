@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from workflow_demo.db import Deployment, utcnow
@@ -14,6 +14,7 @@ from workflow_demo.services.deployments import add_event
 from workflow_demo.services.states import Status
 
 MAX_RUNS = 20
+MAX_TITLE = 200
 
 
 def _bot_workflows(svc: AppServices) -> list[str]:
@@ -21,10 +22,16 @@ def _bot_workflows(svc: AppServices) -> list[str]:
 
 
 def activation(svc: AppServices, db: Session, slack_user_id: str, *, lock: bool = False) -> Deployment | None:
-    """The most recent active activation for this Slack user (if several demo users share one)."""
+    """The most recent live activation for this Slack user (if several demo users share one).
+
+    Live = active and not past its expiry time, even before the sweeper marks it expired."""
     query = (
         select(Deployment)
-        .where(Deployment.workflow_id.in_(_bot_workflows(svc)), Deployment.status == Status.ACTIVE)
+        .where(
+            Deployment.workflow_id.in_(_bot_workflows(svc)),
+            Deployment.status == Status.ACTIVE,
+            or_(Deployment.expires_at.is_(None), Deployment.expires_at > utcnow()),
+        )
         .order_by(Deployment.deployed_at.desc())
     )
     if lock:
@@ -36,8 +43,18 @@ def activation(svc: AppServices, db: Session, slack_user_id: str, *, lock: bool 
 
 
 def user_key(svc: AppServices, db: Session, slack_user_id: str) -> str | None:
+    """The tester's current Meegle user key, while their activation and connections still hold.
+
+    Disconnecting Slack or Meegle (or reconnecting Slack as someone else) ends the mapping at once;
+    a corrected user key applies without activating again."""
     dep = activation(svc, db, slack_user_id)
-    return (dep.platform_refs or {}).get("meegle_user_key") if dep is not None else None
+    if dep is None:
+        return None
+    connections = {c.connector: c for c in dep.user.connections if c.status == "active"}
+    slack, key = connections.get("slack"), connections.get("meegle_user_key")
+    if slack is None or (slack.details or {}).get("slack_user_id") != slack_user_id or key is None:
+        return None
+    return (key.details or {}).get("value") or None
 
 
 def record_card(svc: AppServices, db: Session, slack_user_id: str, title: str, url: str) -> bool:
@@ -46,6 +63,8 @@ def record_card(svc: AppServices, db: Session, slack_user_id: str, title: str, u
     if dep is None:
         db.rollback()
         return False
+    if len(title) > MAX_TITLE:
+        title = title[: MAX_TITLE - 1] + "…"
     now = utcnow().isoformat()
     run: dict[str, Any] = {
         "id": f"card-{uuid.uuid4().hex[:12]}",

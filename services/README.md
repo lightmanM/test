@@ -25,7 +25,8 @@ modal secret create workflow-demo-slack-bot \
   MEEGLE_WORK_ITEM_TYPE_KEY=... MEEGLE_USER_KEY=... \
   USER_MAP_URL=https://<demo>/api/bot/user-map CARD_EVENTS_URL=https://<demo>/api/bot/cards \
   BOT_API_TOKEN=<token>
-modal deploy services/slack-meegle-bot/modal_app.py         # starts within 10 minutes
+modal deploy services/slack-meegle-bot/modal_app.py         # starts within 10 minutes; picks up
+                                                            # a new deploy/secret within an hour
 ```
 
 `READER_MIN_CONTAINERS=1 modal deploy …` keeps one reader warm during a demo session (a cold
@@ -40,7 +41,10 @@ browser start can exceed n8n's 60 s per-article timeout).
   Modal containers have no persistent disk for `data/user-map.json`. `/meegle-bind` then points
   people to the demo site.
 - `CARD_EVENTS_URL`: after creating a card the bot reports `{slack_user_id, title, url}` to the
-  demo (`POST /api/bot/cards`), which lists it under the tester's results.
+  demo (`POST /api/bot/cards`, not awaited, so the Slack reply isn't delayed), which lists it under
+  the tester's results.
+- Mention handling looks the requester and all assignees up in parallel, and the "not bound"
+  hint points to **Activate for me** instead of `/meegle-bind`.
 
 `slack-meegle-bot/check.sh` applies the patch to a copy of the team's code and tests the patched
 modules (CI runs it). If the team changes `src/index.js` or `src/userMap.js`, regenerate the

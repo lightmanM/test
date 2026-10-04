@@ -1,9 +1,9 @@
 """The shared Slack → Meegle bot (one Modal deployment for everyone): "Activate for me".
 
-Nothing is deployed per tester. Activating records the tester's Slack user ID and Meegle user key
-in the deployment's refs; the bot looks them up through ``/api/bot/user-map`` while the deployment
-is active, and reports created cards to ``/api/bot/cards`` (shown as runs). Deactivating or the
-24 h expiry ends the mapping because only active deployments are consulted.
+Nothing is deployed per tester. Activating records the tester's Slack user ID in the deployment's
+refs; the bot looks testers up through ``/api/bot/user-map`` (answered from their current
+connections while the activation is live) and reports created cards to ``/api/bot/cards`` (shown
+as runs). Deactivating, the 24 h expiry or disconnecting Slack/Meegle ends the mapping.
 """
 
 from __future__ import annotations

@@ -32,7 +32,8 @@ class UserKeyOut(BaseModel):
 
 class CardIn(BaseModel):
     slack_user_id: str = Field(pattern=SLACK_USER_ID)
-    title: str = Field(min_length=1, max_length=300)
+    # Whatever the Slack message said (no limit there); shortened when stored.
+    title: str = Field(min_length=1, max_length=40_000)
     url: str = Field(max_length=500, pattern=r"^https://")
 
 

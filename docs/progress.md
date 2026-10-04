@@ -113,11 +113,14 @@ execution (cached) instead of on every poll; `fresh_credentials` is the single N
 Notes: `services/README.md` has the deploy commands (P7). Reader: `Image.from_dockerfile` on the team's Dockerfile
 (+ Python), `@modal.web_server(8000)`, refuses to start without `API_TOKEN`, one container (optionally kept warm).
 Bot: Node 20 image with the team's code + `services/slack-meegle-bot/demo.patch` (opt-in env vars: `USER_MAP_URL`
-→ async lookups against the demo, `CARD_EVENTS_URL` → card reports; file mode unchanged), `run_bot` restarts node
-on crashes for up to 24 h, a 10-minute cron starts it when nothing runs or is queued (`max_containers=1`).
-`check.sh` (CI job `services`) applies the patch to a copy and runs Node tests. Demo side: `api/bot.py`
+→ parallel async lookups against the demo, `CARD_EVENTS_URL` → non-blocking card reports, demo hint instead of
+`/meegle-bind`; file mode unchanged). `run_bot` runs ~1 h (restarting node after crashes) and queues its successor
+in `finally` (`max_containers=1`, so no overlap and a redeploy/secret applies within the hour); a 10-minute cron
+starts it when nothing runs or is queued. `check.sh` (CI job `services`) applies the patch to a copy and runs Node
+tests, including the mention handler with stubbed bolt/Meegle. Demo side: `api/bot.py`
 (`GET /api/bot/user-map/{slack_user_id}`, `POST /api/bot/cards`, Bearer `BOT_API_TOKEN`), `services/bot.py`
-(lookups only over *active* bot deployments, so deactivate/expiry ends the mapping), `adapters/modal.py`
+(lookups only over live bot deployments — active and before `expires_at` — and answered from the tester's
+current Slack + Meegle connections, so deactivate/expiry/disconnect ends the mapping; long card titles shortened), `adapters/modal.py`
 (`SharedBotAdapter`: Activate records `slack_user_id` + Meegle user key in refs; real Slack connection required,
 optional `SLACK_BOT_TEAM_ID` workspace check; card history kept on redeploy). The fake adapter records the same refs.
 - [x] `services/medium-reader/modal_app.py` (team Dockerfile + web_server)
@@ -159,7 +162,7 @@ optional `SLACK_BOT_TEAM_ID` workspace check; card history kept on redeploy). Th
 | 2026-10-04 | Leaked Meegle token removed from git history (2 commits rewritten; `main` now at e7c40dc). Owner to revoke the token in Meegle. |
 
 ## Session log
-- 2026-10-04: PR #5 (P3) merged. P4 implemented: 125 backend tests, 2 bot Node tests, 5 E2E.
+- 2026-10-04: PR #5 (P3) merged. P4 implemented and reviewed (8 findings fixed): 127 backend tests, 3 bot Node tests, 5 E2E.
 - 2026-10-04: PR #4 (P2) merged. P3 implemented and reviewed (10 findings fixed): 117 backend tests (transform golden, adapter contract, API flow).
 - 2026-10-04: PR #3 (P1b) merged. P2 implemented and reviewed (10 findings fixed): 88 backend tests, 8 unit + 5 E2E (frontend).
 - 2026-10-04: PR #2 (P1a) merged. P1b implemented: 4 E2E + 3 unit (frontend), 70 backend tests.
