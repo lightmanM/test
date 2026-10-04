@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     reader_base_url: str | None = None  # the medium-reader service (P4)
     reader_api_token: SecretStr | None = None
 
+    # Shared Slack → Meegle bot on Modal (P4): it calls /api/bot/* with this token.
+    bot_api_token: SecretStr | None = None
+    # Optional: the bot's Slack workspace; testers must connect Slack in the same one.
+    slack_bot_team_id: str | None = None
+
     # Infrastructure
     database_url: str = "sqlite:///./workflow_demo.db"
     public_base_url: str = "http://localhost:8000"

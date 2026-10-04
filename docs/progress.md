@@ -3,8 +3,8 @@
 Living document. Update at the end of every work session and every PR.
 
 ## Current status
-- **Phase**: P3 n8n — in review.
-- **Next step**: merge the P3 PR, then start P4 (Modal services: reader + Slack bot).
+- **Phase**: P4 Modal services — in review.
+- **Next step**: merge the P4 PR, then start P5 (Make Bridge adapter).
 - **Blocked on owner**: nothing until P7 (credentials). See plan §15.
 
 ## Phases and PRs
@@ -15,8 +15,8 @@ Living document. Update at the end of every work session and every PR.
 | P1a Backend core | [#2](https://github.com/lightmanM/test/pull/2) | merged | auth, DB, catalog API, state machine, fake adapters |
 | P1b Frontend | [#3](https://github.com/lightmanM/test/pull/3) | merged | sign-in, catalog, workflow page, admin shell |
 | P2 Connections | [#4](https://github.com/lightmanM/test/pull/4) | merged | Nango connect + manual secrets |
-| P3 n8n | #5 | in review | adapter, 3 transforms, per-deployment credentials, Run now, results |
-| P4 Modal services | — | not started | reader + bot on Modal, bot patches, "Activate for me" |
+| P3 n8n | [#5](https://github.com/lightmanM/test/pull/5) | merged | adapter, 3 transforms, per-deployment credentials, Run now, results |
+| P4 Modal services | #6 | in review | reader + bot on Modal, bot patches, "Activate for me" |
 | P5 Make Bridge | — | not started | Bridge adapter, popup + callback, unavailable state |
 | P6 Lifecycle & admin | — | not started | 24 h sweeper, redeploy/delete, admin page, setup check, E2E |
 | P7 Go live | — | not started | Modal + Neon deploy, owner credentials, live checklist |
@@ -110,9 +110,19 @@ execution (cached) instead of on every poll; `fresh_credentials` is the single N
 - [x] Run-now webhook; result summaries; API-level flow test with mocked Nango + n8n
 
 ### P4 Modal services
-- [ ] `services/medium-reader/modal_app.py` (team Dockerfile + web_server)
-- [ ] `services/slack-meegle-bot/modal_app.py` + opt-in patches (user map via API, card events)
-- [ ] Bot API endpoints; "Activate for me" flow
+Notes: `services/README.md` has the deploy commands (P7). Reader: `Image.from_dockerfile` on the team's Dockerfile
+(+ Python), `@modal.web_server(8000)`, refuses to start without `API_TOKEN`, one container (optionally kept warm).
+Bot: Node 20 image with the team's code + `services/slack-meegle-bot/demo.patch` (opt-in env vars: `USER_MAP_URL`
+→ async lookups against the demo, `CARD_EVENTS_URL` → card reports; file mode unchanged), `run_bot` restarts node
+on crashes for up to 24 h, a 10-minute cron starts it when nothing runs or is queued (`max_containers=1`).
+`check.sh` (CI job `services`) applies the patch to a copy and runs Node tests. Demo side: `api/bot.py`
+(`GET /api/bot/user-map/{slack_user_id}`, `POST /api/bot/cards`, Bearer `BOT_API_TOKEN`), `services/bot.py`
+(lookups only over *active* bot deployments, so deactivate/expiry ends the mapping), `adapters/modal.py`
+(`SharedBotAdapter`: Activate records `slack_user_id` + Meegle user key in refs; real Slack connection required,
+optional `SLACK_BOT_TEAM_ID` workspace check; card history kept on redeploy). The fake adapter records the same refs.
+- [x] `services/medium-reader/modal_app.py` (team Dockerfile + web_server)
+- [x] `services/slack-meegle-bot/modal_app.py` + opt-in patch (user map via API, card events) + Node tests
+- [x] Bot API endpoints; "Activate for me" flow; E2E posts a bot card and sees it under Results
 
 ### P5 Make Bridge
 - [ ] Bridge client (JWT per request), availability check → "unavailable"
@@ -149,6 +159,7 @@ execution (cached) instead of on every poll; `fresh_credentials` is the single N
 | 2026-10-04 | Leaked Meegle token removed from git history (2 commits rewritten; `main` now at e7c40dc). Owner to revoke the token in Meegle. |
 
 ## Session log
+- 2026-10-04: PR #5 (P3) merged. P4 implemented: 125 backend tests, 2 bot Node tests, 5 E2E.
 - 2026-10-04: PR #4 (P2) merged. P3 implemented and reviewed (10 findings fixed): 117 backend tests (transform golden, adapter contract, API flow).
 - 2026-10-04: PR #3 (P1b) merged. P2 implemented and reviewed (10 findings fixed): 88 backend tests, 8 unit + 5 E2E (frontend).
 - 2026-10-04: PR #2 (P1a) merged. P1b implemented: 4 E2E + 3 unit (frontend), 70 backend tests.

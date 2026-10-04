@@ -49,6 +49,25 @@ jobs:
             demo-project/meegle-daily-digest/meegle-daily-digest.n8n-cloud-sdk.js /tmp/compiled.json
           python scripts/build_catalog.py --check-compiled /tmp/compiled.json
 
+  services:
+    # Modal apps for the shared reader and Slack bot. The bot's demo patch must still apply to the
+    # team's code, and the patched modules are tested without installing the bot's dependencies.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: services/slack-meegle-bot/check.sh
+      - run: |
+          pip install ruff
+          ruff check --config app/backend/pyproject.toml services
+          ruff format --config app/backend/pyproject.toml --check services
+          python -m py_compile services/medium-reader/modal_app.py services/slack-meegle-bot/modal_app.py
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

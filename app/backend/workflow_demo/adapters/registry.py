@@ -30,10 +30,12 @@ def fake_registry(popup_url_builder: Callable[[str], str]) -> AdapterRegistry:
 
 def real_registry(settings: Settings, http: httpx.Client) -> AdapterRegistry:
     """Adapters for the platforms whose owner credentials are configured; others are unavailable."""
+    from workflow_demo.adapters.modal import SharedBotAdapter
     from workflow_demo.adapters.n8n import N8nAdapter
     from workflow_demo.n8n.client import N8nClient
 
-    adapters: dict[Platform, PlatformAdapter] = {}
+    # The bot adapter reports its own missing configuration, so it's always registered.
+    adapters: dict[Platform, PlatformAdapter] = {Platform.MODAL: SharedBotAdapter(settings)}
     if settings.n8n_base_url and settings.n8n_api_key:
         client = N8nClient(settings.n8n_base_url, settings.n8n_api_key.get_secret_value(), http)
         adapters[Platform.N8N] = N8nAdapter(settings, client, http)

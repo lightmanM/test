@@ -119,7 +119,7 @@ a "Run now" trigger.
   - after a card is created, POST `{slackUserId, title, url}` to the demo backend so the tester sees it under Results.
 - **Tester "Activate for me"**: requires Slack connection (Nango; the tester's Slack user ID comes from the OAuth response's `authed_user.id`) + Meegle user key (text box). Delete or 24 h expiry removes the mapping.
 - **Try it / results**: invite the bot to a channel, `@bot Fix login error @me` → card + thread reply; demo lists the cards the bot created for that tester.
-- **Runtime on Modal**: Node 20 image; long-running function (24 h max per run) restarted by a schedule; brief overlaps are harmless because both copies are identical.
+- **Runtime on Modal**: Node 20 image; long-running function (24 h max per run, restarts node after a crash) with one container at a time; a 10-minute schedule starts it whenever nothing is running or queued.
 
 ---
 
