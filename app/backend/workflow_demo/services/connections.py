@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from workflow_demo.adapters.base import AdapterError, OAuthTokens
 from workflow_demo.catalog.models import Connector, ConnectorKind
 from workflow_demo.crypto import CryptoError
 from workflow_demo.db import Connection, User
@@ -182,12 +183,70 @@ def _google_email(svc: AppServices, access_token: str | None) -> str | None:
         return None
 
 
-def fresh_credentials(svc: AppServices, record: Connection) -> NangoConnection:
-    """The connection with a valid access token (Nango refreshes expired ones); used by deploys."""
+def fresh_credentials(
+    svc: AppServices, record: Connection, *, include_refresh_token: bool = False
+) -> NangoConnection:
+    """The connection with a valid access token (Nango refreshes expired ones); used by deploys.
+
+    ``include_refresh_token`` only when another platform must refresh the token itself (n8n)."""
+    if record.method != "nango":
+        raise ConnectionError_(f"{record.connector} isn't connected through Nango")
     try:
-        return _nango(svc).get_connection(record.nango_connection_id, record.nango_integration)
+        return _nango(svc).get_connection(
+            record.nango_connection_id,
+            record.nango_integration,
+            include_refresh_token=include_refresh_token,
+        )
     except NangoError as exc:
         raise ConnectionError_(f"Couldn't read the {record.connector} connection: {exc}", 502) from None
+
+
+class UserCredentials:
+    """A user's secrets for deploy jobs (``adapters.base.SecretReader``); read on demand."""
+
+    def __init__(self, svc: AppServices, user: User) -> None:
+        self._svc = svc
+        self._user = user
+
+    def _record(self, connector_id: str) -> Connection:
+        for record in self._user.connections:
+            if record.connector == connector_id and record.status == "active":
+                return record
+        raise AdapterError(f"Connect {self._name(connector_id)} first")
+
+    def _name(self, connector_id: str) -> str:
+        found = self._svc.catalog.connectors.get(connector_id)
+        return found.name if found else connector_id
+
+    def oauth_tokens(self, connector: str, *, with_refresh_token: bool = False) -> OAuthTokens:
+        record = self._real(connector)
+        try:
+            conn = fresh_credentials(self._svc, record, include_refresh_token=with_refresh_token)
+        except ConnectionError_ as exc:
+            raise AdapterError(exc.message) from None
+        if not conn.access_token:
+            raise AdapterError(f"Your {self._name(connector)} connection has no access token; reconnect it")
+        if with_refresh_token and not conn.refresh_token:
+            raise AdapterError(f"Your {self._name(connector)} connection can't be refreshed; reconnect it")
+        return OAuthTokens(
+            access_token=conn.access_token,
+            refresh_token=conn.refresh_token if with_refresh_token else None,
+            scope=conn.raw.get("scope"),
+        )
+
+    def secret_value(self, connector: str) -> str:
+        try:
+            return read_secret(self._svc, self._user, self._real(connector))
+        except ConnectionError_ as exc:
+            raise AdapterError(exc.message) from None
+
+    def _real(self, connector_id: str) -> Connection:
+        record = self._record(connector_id)
+        if record.method == "fake":
+            raise AdapterError(
+                f"{self._name(connector_id)} was connected with demo data; connect it for real"
+            )
+        return record
 
 
 # ----------------------------------------------------------------------------- manual values

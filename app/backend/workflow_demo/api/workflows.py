@@ -9,6 +9,7 @@ from workflow_demo.api.schemas import (
     ConnectorStatus,
     DeploymentOut,
     EventOut,
+    Link,
     SettingOut,
     WorkflowDetail,
     WorkflowSummary,
@@ -33,11 +34,25 @@ def deployment_out(dep: Deployment | None, with_events: bool = False) -> Deploym
         deployed_at=dep.deployed_at,
         expires_at=dep.expires_at,
         popup_url=(dep.platform_refs or {}).get("popup_url") if dep.status == Status.AWAITING_USER else None,
+        links=user_links(dep),
         updated_at=dep.updated_at,
         events=[EventOut(at=e.at, type=e.type, message=e.message) for e in dep.events[-30:]]
         if with_events
         else [],
     )
+
+
+# Platform refs a user may open (never the owner's platform pages, which they can't access).
+USER_LINKS = {"spreadsheet_url": "Your uptime spreadsheet"}
+
+
+def user_links(dep: Deployment) -> list[Link]:
+    refs = dep.platform_refs or {}
+    return [
+        Link(label=label, url=refs[key])
+        for key, label in USER_LINKS.items()
+        if isinstance(refs.get(key), str) and refs[key].startswith("https://")
+    ]
 
 
 def summary(svc: AppServices, entry: WorkflowEntry, active: dict[str, Connection]) -> dict:

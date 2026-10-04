@@ -23,6 +23,21 @@ class ConnectionInfo:
 
 
 @dataclass(frozen=True)
+class OAuthTokens:
+    access_token: str
+    refresh_token: str | None = None
+    scope: str | None = None
+
+
+class SecretReader(Protocol):
+    """Reads the user's secrets on demand, only inside deploy jobs (never stored in refs)."""
+
+    def oauth_tokens(self, connector: str, *, with_refresh_token: bool = False) -> OAuthTokens: ...
+
+    def secret_value(self, connector: str) -> str: ...
+
+
+@dataclass(frozen=True)
 class DeployContext:
     username: str
     workflow: WorkflowEntry
@@ -34,6 +49,9 @@ class DeployContext:
     # (Make Bridge redirectUri). Valid only for this deploy attempt.
     user_step_state: str | None = None
     callback_url: str | None = None
+    credentials: SecretReader | None = None
+    # Refs of the deployment being replaced (redeploy only), e.g. to reuse the user's spreadsheet.
+    previous_refs: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -71,7 +89,7 @@ class RunSummary:
 class PlatformAdapter(Protocol):
     platform: Platform
 
-    def check_available(self) -> Availability: ...
+    def check_available(self, entry: WorkflowEntry | None = None) -> Availability: ...
 
     def deploy(self, ctx: DeployContext) -> DeployResult: ...
 

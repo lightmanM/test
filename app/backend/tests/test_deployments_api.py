@@ -150,7 +150,7 @@ def test_unavailable_platform_blocks_deploy(user, services):
     from workflow_demo.adapters.base import Availability
     from workflow_demo.catalog.models import Platform
 
-    services.registry.get(Platform.MAKE).check_available = lambda: Availability(
+    services.registry.get(Platform.MAKE).check_available = lambda entry=None: Availability(
         False, "Make Bridge is not enabled"
     )
     workflows = {w["id"]: w for w in user.get("/api/workflows").json()}

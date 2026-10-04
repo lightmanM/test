@@ -40,6 +40,18 @@ class Settings(BaseSettings):
     # 32 random bytes, base64 (python -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())")
     data_encryption_key: SecretStr | None = None
 
+    # n8n (uptime monitor, Meegle digest, Medium digest)
+    n8n_base_url: str | None = None  # e.g. https://acme.app.n8n.cloud
+    n8n_api_key: SecretStr | None = None
+    # The Internal Google OAuth client configured in Nango; n8n needs it to refresh Google tokens.
+    google_client_id: str | None = None
+    google_client_secret: SecretStr | None = None
+    # Owner-provided keys, given to each Medium digest deployment as its own n8n credentials.
+    openai_api_key: SecretStr | None = None
+    openai_base_url: str = "https://api.openai.com/v1"
+    reader_base_url: str | None = None  # the medium-reader service (P4)
+    reader_api_token: SecretStr | None = None
+
     # Infrastructure
     database_url: str = "sqlite:///./workflow_demo.db"
     public_base_url: str = "http://localhost:8000"

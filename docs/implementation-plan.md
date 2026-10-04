@@ -131,7 +131,7 @@ a "Run now" trigger.
 | `workflow-demo-medium-reader` | `demo-project/medium-digest-project/services/medium-reader` | `Image.from_dockerfile(..., add_python="3.12")` (team's Dockerfile, CloakBrowser base) + `@modal.web_server(8000)`; `API_TOKEN` from a Modal secret; 1 container, a few concurrent requests |
 | `workflow-demo-slack-bot` | `demo-project/slark-meegle-bot` + patches | Node 20 image, `npm ci`; long-running function with bot + Meegle secrets |
 
-Shared n8n credentials (`openAiApi`, reader `httpHeaderAuth`) are created once by a bootstrap step and reused by every Medium digest deployment.
+The owner's OpenAI key and the reader token are given to each Medium digest deployment as its own n8n credentials (`openAiApi`, reader `httpHeaderAuth`), created at deploy and deleted at undeploy, so there is no shared state to bootstrap or rotate (changed in P3).
 
 ---
 
@@ -233,7 +233,7 @@ services/
   medium-reader/modal_app.py      wraps the team's reader service
   slack-meegle-bot/modal_app.py   wraps the team's bot + patches
 deploy/modal_app.py               demo web app, jobs, sweeper
-scripts/                          compile_n8n_sdk.mjs, bootstrap_shared.py, setup_check.py
+scripts/                          compile_n8n_sdk.mjs, setup_check.py
 docs/                             implementation-plan.md, setup-guide.md
 demo-project/                     the team's originals (unchanged)
 ```
@@ -274,7 +274,7 @@ demo-project/                     the team's originals (unchanged)
 | P0 Foundations | Repo layout, tooling, catalog files, fixed templates, Meegle SDK compiled to JSON, setup guide (Slack app manifest, Google Internal OAuth steps, Nango, Make Bridge, Modal, Neon) | Templates pass transform tests |
 | P1 App skeleton | Backend (auth, DB, catalog API, state machine) + frontend (sign-in, catalog, workflow page) on fake adapters | Full click-through in fake mode |
 | P2 Connections | Nango connect flow + manual secrets (encrypted) | Connect/reconnect/delete work (mocked Nango in tests) |
-| P3 n8n | n8n adapter + 3 transforms + shared credential bootstrap + Run now + results | Contract tests pass; fake-mode E2E |
+| P3 n8n | n8n adapter + 3 transforms + per-deployment credentials + Run now + results | Contract tests pass; fake-mode E2E |
 | P4 Modal services | Reader and bot on Modal; bot patches; "Activate for me" | Services deployable via script; activation flow tested |
 | P5 Make Bridge | Bridge adapter, availability check, popup + callback, run/logs/delete, `make-setup.md` | Contract tests pass; "unavailable" path works |
 | P6 Lifecycle & admin | 24 h sweeper, redeploy, delete, admin page, setup check | E2E covers lifecycle |

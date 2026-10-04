@@ -92,6 +92,14 @@ def edges(wf: Workflow, source: str, target: str) -> list[tuple[int, dict[str, A
     ]
 
 
+def edges_from(wf: Workflow, source: str, *, output: int) -> list[tuple[int, dict[str, Any]]]:
+    """Return ``(output_index, edge)`` for every edge leaving ``source`` on ``output``."""
+    branches = wf.get("connections", {}).get(source, {}).get("main", [])
+    if output >= len(branches):
+        return []
+    return [(output, edge) for edge in (branches[output] or [])]
+
+
 def disconnect(wf: Workflow, source: str, target: str, *, output: int | None = None) -> None:
     """Remove edges ``source -> target`` (only on ``output`` if given)."""
     branches = wf.get("connections", {}).get(source, {}).get("main", [])

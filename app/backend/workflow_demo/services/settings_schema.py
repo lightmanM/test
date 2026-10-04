@@ -66,3 +66,17 @@ def validate_settings(schema: list[Setting], given: dict[str, Any]) -> dict[str,
     if errors:
         raise SettingsError(errors)
     return cleaned
+
+
+def reject_expressions(cleaned: dict[str, Any]) -> None:
+    """n8n evaluates a parameter starting with "=" as an expression; settings must stay literal."""
+    errors = {
+        key: "can't start with '='"
+        for key, value in cleaned.items()
+        if isinstance(value, str)
+        and value.startswith("=")
+        or isinstance(value, list)
+        and any(isinstance(v, str) and v.startswith("=") for v in value)
+    }
+    if errors:
+        raise SettingsError(errors)

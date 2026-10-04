@@ -50,6 +50,11 @@ class EventOut(BaseModel):
     message: str
 
 
+class Link(BaseModel):
+    label: str
+    url: str
+
+
 class DeploymentOut(BaseModel):
     workflow_id: str
     status: str
@@ -58,6 +63,7 @@ class DeploymentOut(BaseModel):
     deployed_at: datetime | None
     expires_at: datetime | None
     popup_url: str | None
+    links: list[Link] = []  # things the deployment created for the user, e.g. their spreadsheet
     updated_at: datetime
     events: list[EventOut] = []
 
