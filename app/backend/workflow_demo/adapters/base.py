@@ -30,6 +30,10 @@ class DeployContext:
     settings: dict[str, Any]
     connections: dict[str, ConnectionInfo]
     refs: dict[str, Any]  # platform IDs from the previous deploy (undeploy / runs / redeploy)
+    # Set on deploy: signed one-time token and the URL the platform's popup must return to
+    # (Make Bridge redirectUri). Valid only for this deploy attempt.
+    user_step_state: str | None = None
+    callback_url: str | None = None
 
 
 @dataclass(frozen=True)

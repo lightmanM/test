@@ -5,7 +5,8 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import create_engine
 
-from workflow_demo.db import Base
+from workflow_demo.config import DatabaseSettings
+from workflow_demo.db import Base, normalize_database_url
 
 config = context.config
 if config.config_file_name is not None:
@@ -13,12 +14,9 @@ if config.config_file_name is not None:
 
 
 def database_url() -> str:
+    """``-x url=...``, then ``sqlalchemy.url``, then DATABASE_URL from the env or app/backend/.env."""
     url = context.get_x_argument(as_dictionary=True).get("url") or config.get_main_option("sqlalchemy.url")
-    if url:
-        return url
-    import os
-
-    return os.environ.get("DATABASE_URL", "sqlite:///./workflow_demo.db")
+    return normalize_database_url(url or DatabaseSettings().database_url)
 
 
 def run_migrations() -> None:

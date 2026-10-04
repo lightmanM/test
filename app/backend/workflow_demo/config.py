@@ -8,6 +8,14 @@ from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+class DatabaseSettings(BaseSettings):
+    """Just the database URL; used by Alembic, which doesn't need the rest."""
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    database_url: str = "sqlite:///./workflow_demo.db"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -22,6 +30,8 @@ class Settings(BaseSettings):
     # Deployments
     deployment_ttl_hours: int = 24
     fake_platforms: bool = Field(default=False, validation_alias="DEMO_FAKE_PLATFORMS")
+    # Jobs run inside this process, so on startup any unfinished job was lost: fail it.
+    recover_jobs_on_startup: bool = True
 
     # Infrastructure
     database_url: str = "sqlite:///./workflow_demo.db"

@@ -14,7 +14,7 @@ from workflow_demo.api.schemas import (
     WorkflowSummary,
 )
 from workflow_demo.catalog.models import ConnectorKind, Platform, WorkflowEntry
-from workflow_demo.db import Deployment, User
+from workflow_demo.db import Deployment
 from workflow_demo.services import deployments as svc_deployments
 from workflow_demo.services.container import AppServices
 from workflow_demo.services.states import Status
@@ -40,8 +40,7 @@ def deployment_out(dep: Deployment | None, with_events: bool = False) -> Deploym
     )
 
 
-def summary(svc: AppServices, user: User, entry: WorkflowEntry, dep: Deployment | None) -> dict:
-    connected = {c.connector for c in user.connections if c.status == "active"}
+def summary(svc: AppServices, entry: WorkflowEntry, connected: set[str]) -> dict:
     connectors = []
     for wc in entry.connectors:
         connector = svc.catalog.connectors[wc.id]
@@ -66,7 +65,7 @@ def summary(svc: AppServices, user: User, entry: WorkflowEntry, dep: Deployment 
         "platform": entry.platform.value,
         "available": avail.available,
         "unavailable_reason": avail.reason,
-        "ready": not svc_deployments.missing_connectors(svc, user, entry),
+        "ready": not svc_deployments.missing_connectors(svc, entry, connected),
         "connectors": connectors,
     }
 
@@ -74,10 +73,9 @@ def summary(svc: AppServices, user: User, entry: WorkflowEntry, dep: Deployment 
 @router.get("/workflows", response_model=list[WorkflowSummary])
 def list_workflows(svc: Services, db: DB, user: CurrentUser) -> list[WorkflowSummary]:
     deps = {d.workflow_id: d for d in user.deployments}
+    connected = svc_deployments.active_connectors(user)
     return [
-        WorkflowSummary(
-            **summary(svc, user, entry, deps.get(entry.id)), deployment=deployment_out(deps.get(entry.id))
-        )
+        WorkflowSummary(**summary(svc, entry, connected), deployment=deployment_out(deps.get(entry.id)))
         for entry in svc.catalog.workflows
     ]
 
@@ -90,7 +88,7 @@ def get_workflow(workflow_id: str, svc: Services, db: DB, user: CurrentUser) -> 
         raise HTTPException(404, "Unknown workflow") from None
     dep = svc_deployments.get_deployment(db, user, workflow_id)
     return WorkflowDetail(
-        **summary(svc, user, entry, dep),
+        **summary(svc, entry, svc_deployments.active_connectors(user)),
         deployment=deployment_out(dep, with_events=True),
         description=entry.description,
         settings=[SettingOut(**s.model_dump(mode="json")) for s in entry.settings],

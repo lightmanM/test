@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
+from datetime import timedelta
 
 from fastapi import FastAPI
 
@@ -34,20 +36,25 @@ def build_services(
         signer=Signer(settings.session_secret.get_secret_value()),
     )
     if registry is None and settings.fake_platforms:
-        svc.registry = fake_registry(lambda dep_id: fake_popup_url(svc, dep_id))
+        svc.registry = fake_registry(lambda state: f"{settings.base_url}/fake/make-popup?state={state}")
     run = lambda job_id: svc_deployments.run_job(svc, job_id)  # noqa: E731
     svc.runner = (runner_factory or ThreadJobRunner)(run)
     return svc
 
 
-def fake_popup_url(svc: AppServices, deployment_id: int) -> str:
-    return f"{svc.settings.base_url}/fake/make-popup?state={user_steps.user_step_state(svc, deployment_id)}"
-
-
 def create_app(settings: Settings | None = None, services: AppServices | None = None) -> FastAPI:
     settings = settings or get_settings()
     svc = services or build_services(settings)
-    app = FastAPI(title="Workflow Deploy Demo", docs_url="/api/docs", openapi_url="/api/openapi.json")
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        if svc.settings.recover_jobs_on_startup:
+            svc_deployments.recover_stale_jobs(svc, older_than=timedelta(0))
+        yield
+
+    app = FastAPI(
+        title="Workflow Deploy Demo", docs_url="/api/docs", openapi_url="/api/openapi.json", lifespan=lifespan
+    )
     app.state.services = svc
     for module in (auth, workflows, connections, deployments, admin, user_steps):
         app.include_router(module.router)

@@ -37,9 +37,9 @@ class FakeAdapter:
 
     def deploy(self, ctx: DeployContext) -> DeployResult:
         refs: dict[str, Any] = {"fake_id": f"fake-{ctx.workflow.id}-{ctx.deployment_id}", "runs": []}
-        if self.platform is Platform.MAKE and self._popup_url is not None:
+        if self.platform is Platform.MAKE and self._popup_url is not None and ctx.user_step_state:
             return DeployResult(
-                refs={**refs, "popup_url": self._popup_url(ctx.deployment_id)},
+                refs={**refs, "popup_url": self._popup_url(ctx.user_step_state)},
                 status="awaiting_user",
                 message="Waiting for you to connect GitHub and Slack in Make's popup",
             )

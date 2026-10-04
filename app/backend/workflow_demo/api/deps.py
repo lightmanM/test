@@ -31,7 +31,8 @@ DB = Annotated[Session, Depends(get_db)]
 def current_user(svc: Services, db: DB, wd_session: Annotated[str | None, Cookie()] = None) -> User:
     payload = svc.signer.loads(wd_session, SESSION_COOKIE, svc.settings.session_days * 86400)
     user = db.get(User, payload["uid"]) if isinstance(payload, dict) and "uid" in payload else None
-    if user is None:
+    # Also match the username, so a cookie can't outlive its user if an id is ever reused.
+    if user is None or user.username != payload.get("username"):
         raise HTTPException(401, "Sign in first")
     return user
 

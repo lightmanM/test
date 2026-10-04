@@ -20,5 +20,6 @@ class AdapterRegistry:
             raise AdapterError(f"{platform.value} deployments are not configured") from None
 
 
-def fake_registry(popup_url_builder: Callable[[int], str]) -> AdapterRegistry:
+def fake_registry(popup_url_builder: Callable[[str], str]) -> AdapterRegistry:
+    """``popup_url_builder(user_step_state)`` returns the fake Make popup URL."""
     return AdapterRegistry({platform: FakeAdapter(platform, popup_url_builder) for platform in Platform})

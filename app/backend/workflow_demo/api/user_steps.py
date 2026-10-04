@@ -10,21 +10,9 @@ from fastapi.responses import HTMLResponse
 
 from workflow_demo.api.deps import DB, Services
 from workflow_demo.services import deployments as svc_deployments
-from workflow_demo.services.container import AppServices
-from workflow_demo.services.deployments import DeploymentError
+from workflow_demo.services.deployments import USER_STEP_MAX_AGE_SECONDS, USER_STEP_PURPOSE, DeploymentError
 
 router = APIRouter(tags=["user-steps"])
-
-USER_STEP = "user-step"
-USER_STEP_MAX_AGE = 3600
-
-
-def user_step_state(svc: AppServices, deployment_id: int) -> str:
-    return svc.signer.dumps({"deployment_id": deployment_id}, USER_STEP)
-
-
-def callback_url(svc: AppServices, deployment_id: int) -> str:
-    return f"{svc.settings.base_url}/make/callback?state={user_step_state(svc, deployment_id)}"
 
 
 def _page(title: str, body: str, ok: bool) -> HTMLResponse:
@@ -47,12 +35,12 @@ if (window.opener) {{
 
 @router.get("/make/callback", response_class=HTMLResponse)
 def make_callback(request: Request, svc: Services, db: DB, state: str = "") -> HTMLResponse:
-    payload = svc.signer.loads(state, USER_STEP, USER_STEP_MAX_AGE)
+    payload = svc.signer.loads(state, USER_STEP_PURPOSE, USER_STEP_MAX_AGE_SECONDS)
     if not isinstance(payload, dict) or "deployment_id" not in payload:
         return _page("Link expired", "Start the deploy again from the demo.", ok=False)
     params = {k: v for k, v in request.query_params.items() if k != "state"}
     try:
-        svc_deployments.finish_user_step(svc, db, int(payload["deployment_id"]), params)
+        svc_deployments.finish_user_step(svc, db, payload, params)
     except DeploymentError as exc:
         return _page("Couldn't finish the deploy", exc.message, ok=False)
     return _page("All set", "Your workflow is deployed. You can close this window.", ok=True)

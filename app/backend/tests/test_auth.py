@@ -54,3 +54,10 @@ def test_user_session_is_not_admin(client, login):
     login()
     client.cookies.set("wd_admin", client.cookies.get("wd_session"))
     assert client.get("/api/admin/overview").status_code == 401
+
+
+def test_cookie_for_another_username_is_rejected(client, login, services):
+    login("alice")
+    forged = services.signer.dumps({"uid": 1, "username": "mallory"}, "wd_session")
+    client.cookies.set("wd_session", forged)
+    assert client.get("/api/me").status_code == 401
