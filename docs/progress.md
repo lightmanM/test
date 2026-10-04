@@ -214,6 +214,7 @@ Nango refresh (`invalid_credentials`) asks to reconnect. 165 backend tests.
 | 2026-10-04 | Leaked Meegle token removed from git history (2 commits rewritten; `main` now at e7c40dc). Owner to revoke the token in Meegle. |
 
 ## Session log
+- 2026-10-04: Tester bug (uptime): changing "Websites to monitor" and redeploying kept the old sites — the redeploy reused the spreadsheet and ignored the list. Now the list is written into the Sites tab when it changed since it was last written (`sites_written` ref; older deployments rewrite once); unchanged lists keep edits made in the sheet. Verified live; 169 backend tests.
 - 2026-10-04: P7 live on AWS: provisioned the server, deployed the stack, set up Google/Slack/Nango/OpenAI, live-tested uptime, Medium and Meegle digest; fixed n8n delete (unpublish + retry) and the Medium empty-inbox path (165 backend tests).
 - 2026-10-04: Go-live prep: Google OAuth switched to External + Testing (docs: setup guide §3, go-live, plan R14/§15, research notes); expired Nango connections now ask to reconnect (158 backend tests).
 - 2026-10-04: PR #9 (P7 packaging) merged — all 9 PRs in. Remaining: the live go-live run with the owner's credentials.

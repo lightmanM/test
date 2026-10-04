@@ -196,7 +196,7 @@ class N8nAdapter:
         secrets = _CachedSecrets(self._secrets(ctx))
         created = _Created()
         prefix = f"{CREDENTIAL_PREFIX}{ctx.username} · {entry.id}"
-        sheet: dict[str, str] = {}
+        sheet: dict[str, Any] = {}
         try:
             values = {}
             for name, source in spec.values.items():
@@ -366,23 +366,27 @@ class N8nAdapter:
         created.credential_ids.append(credential_id)
         return CredentialRef(id=credential_id, name=name)
 
-    def _spreadsheet(self, ctx: DeployContext, secrets: SecretReader, created: _Created) -> dict[str, str]:
-        """Reuse the previous deployment's spreadsheet on redeploy (keeps the user's Sites edits);
-        otherwise create one seeded from the ``sites`` setting."""
+    def _spreadsheet(self, ctx: DeployContext, secrets: SecretReader, created: _Created) -> dict[str, Any]:
+        """Reuse the previous deployment's spreadsheet on redeploy, otherwise create one seeded from the
+        ``sites`` setting. A reused sheet gets the form's list written into its Sites tab only when the
+        list changed since it was last written (``sites_written``), so edits made in the sheet survive
+        redeploys that don't touch the list."""
         tokens = secrets.oauth_tokens("google", with_refresh_token=True)
+        sites = [str(site) for site in ctx.settings.get("sites") or []]
         previous = ctx.previous_refs.get("spreadsheet_id")
         if previous:
             url = google.spreadsheet_url(self._http, tokens.access_token, str(previous))
             if url:
-                return {"spreadsheet_id": str(previous), "spreadsheet_url": url}
-        sites = [str(site) for site in ctx.settings.get("sites") or []]
+                if ctx.previous_refs.get("sites_written") != sites:  # also when not recorded yet
+                    google.replace_uptime_sites(self._http, tokens.access_token, str(previous), sites)
+                return {"spreadsheet_id": str(previous), "spreadsheet_url": url, "sites_written": sites}
         stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
         sheet = google.create_uptime_sheet(
             self._http, tokens.access_token, f"Uptime monitor (demo) {stamp}", sites
         )
         created.spreadsheet_id, created.spreadsheet_url = sheet.id, sheet.url
         created.google_token = tokens.access_token
-        return {"spreadsheet_id": sheet.id, "spreadsheet_url": sheet.url}
+        return {"spreadsheet_id": sheet.id, "spreadsheet_url": sheet.url, "sites_written": sites}
 
     def _credential_data(self, slot: CredentialSlot, secrets: SecretReader) -> dict[str, Any]:
         s = self._settings
