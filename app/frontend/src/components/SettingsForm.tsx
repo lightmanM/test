@@ -140,11 +140,13 @@ function SlackChannelField({
         className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2"
       />
       <span className="mt-1 block text-xs text-slate-500">
-        {slackConnected && channels.isError
-          ? "Couldn't list your Slack channels, so enter the ID: "
-          : slackConnected && channels.isPending
+        {!slackConnected
+          ? 'Connect Slack to pick from a list, or enter the ID: '
+          : channels.isPending
             ? 'Loading your channels… or enter the ID: '
-            : 'Connect Slack to pick from a list, or enter the ID: '}
+            : channels.isError
+              ? "Couldn't list your Slack channels, so enter the ID: "
+              : 'No public channels found, so enter the ID: '}
         in Slack, open the channel → channel name → the ID is at the bottom of the About tab.
       </span>
     </>

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from typing import Any
 
 import httpx
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from workflow_demo.catalog.models import Connector, ConnectorKind
@@ -58,6 +60,50 @@ def _nango(svc: AppServices):
     return svc.nango
 
 
+def _store(
+    svc: AppServices, db: Session, user: User, connector_id: str, update: Callable[[Connection], None]
+) -> Connection:
+    """Create or update the user's row for a connector, then delete the Nango connection it replaced.
+
+    The old Nango connection goes only after the new row is committed, so a failed save never leaves
+    the row pointing at a deleted connection. Two concurrent first saves race on the unique
+    (user, connector) constraint; the loser retries once as an update.
+    """
+    for attempt in range(2):
+        record = get_connection(db, user, connector_id)
+        replaced = _nango_ref(record)
+        record = record or Connection(user_id=user.id, connector=connector_id)
+        update(record)
+        record.status = "active"
+        db.add(record)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            if attempt:
+                raise
+            continue
+        if replaced and replaced != _nango_ref(record):
+            _delete_in_nango(svc, *replaced)
+        return record
+    raise AssertionError("unreachable")
+
+
+def _nango_ref(record: Connection | None) -> tuple[str | None, str] | None:
+    if record is None or record.method != "nango" or not record.nango_connection_id:
+        return None
+    return record.nango_integration, record.nango_connection_id
+
+
+def _delete_in_nango(svc: AppServices, integration: str | None, connection_id: str) -> None:
+    if svc.nango is None or not integration:
+        return
+    try:
+        svc.nango.delete_connection(connection_id, integration)
+    except NangoError:
+        log.warning("couldn't delete Nango connection %s", connection_id, exc_info=True)
+
+
 # ----------------------------------------------------------------------------- Nango
 
 
@@ -71,7 +117,13 @@ def start_session(svc: AppServices, user: User, connector_id: str) -> dict[str, 
         )
     except NangoError as exc:
         raise ConnectionError_(str(exc), 502) from None
-    return {"token": session.token, "expires_at": session.expires_at, "integration": found.integration}
+    return {
+        "token": session.token,
+        "expires_at": session.expires_at,
+        "integration": found.integration,
+        "api_url": svc.settings.nango_host.rstrip("/"),
+        "connect_url": svc.settings.nango_connect_url.rstrip("/"),
+    }
 
 
 def complete_session(
@@ -81,28 +133,22 @@ def complete_session(
     found = connector(svc, connector_id)
     if found.kind is not ConnectorKind.NANGO:
         raise ConnectionError_("This connector is entered as text, not through a popup")
-    nango = _nango(svc)
     try:
-        conn = nango.get_connection(connection_id, found.integration)
+        conn = _nango(svc).get_connection(connection_id, found.integration)
     except NangoError as exc:
         raise ConnectionError_(str(exc), 404 if exc.status_code == 404 else 502) from None
     if conn.tags.get("end_user_id") != user.username or conn.provider_config_key != found.integration:
         raise ConnectionError_("That connection belongs to someone else", 403)
-
     details = describe(svc, connector_id, conn)
-    existing = get_connection(db, user, connector_id)
-    if existing is not None and existing.method == "nango" and existing.nango_connection_id != connection_id:
-        _delete_in_nango(svc, existing)
-    record = existing or Connection(user_id=user.id, connector=connector_id)
-    record.method = "nango"
-    record.nango_integration = found.integration
-    record.nango_connection_id = connection_id
-    record.secret_ciphertext = None
-    record.details = details
-    record.status = "active"
-    db.add(record)
-    db.commit()
-    return record
+
+    def update(record: Connection) -> None:
+        record.method = "nango"
+        record.nango_integration = found.integration
+        record.nango_connection_id = connection_id
+        record.secret_ciphertext = None
+        record.details = details
+
+    return _store(svc, db, user, connector_id, update)
 
 
 def describe(svc: AppServices, connector_id: str, conn: NangoConnection) -> dict[str, Any]:
@@ -137,22 +183,11 @@ def _google_email(svc: AppServices, access_token: str | None) -> str | None:
 
 
 def fresh_credentials(svc: AppServices, record: Connection) -> NangoConnection:
-    """The connection with an access token Nango refreshed if needed (used by deploys)."""
+    """The connection with a valid access token (Nango refreshes expired ones); used by deploys."""
     try:
-        return _nango(svc).get_connection(
-            record.nango_connection_id, record.nango_integration, refresh_token=True
-        )
+        return _nango(svc).get_connection(record.nango_connection_id, record.nango_integration)
     except NangoError as exc:
         raise ConnectionError_(f"Couldn't read the {record.connector} connection: {exc}", 502) from None
-
-
-def _delete_in_nango(svc: AppServices, record: Connection) -> None:
-    if svc.nango is None or not record.nango_connection_id:
-        return
-    try:
-        svc.nango.delete_connection(record.nango_connection_id, record.nango_integration)
-    except NangoError:
-        log.warning("couldn't delete Nango connection %s", record.nango_connection_id, exc_info=True)
 
 
 # ----------------------------------------------------------------------------- manual values
@@ -167,23 +202,22 @@ def save_manual(svc: AppServices, db: Session, user: User, connector_id: str, va
     if not pattern.match(value):
         raise ConnectionError_(message, 422)
 
-    record = get_connection(db, user, connector_id) or Connection(user_id=user.id, connector=connector_id)
-    if record.method == "nango":
-        _delete_in_nango(svc, record)
-    record.method = "manual"
-    record.nango_integration = record.nango_connection_id = None
     if found.secret:
         if svc.secret_box is None:
             raise ConnectionError_("Secret storage isn't configured on this server", 503)
-        record.secret_ciphertext = svc.secret_box.encrypt(value, _secret_context(user, connector_id))
-        record.details = {"label": f"saved · ends with {value[-4:]}"}
+        ciphertext = svc.secret_box.encrypt(value, _secret_context(user, connector_id))
+        details = {"label": f"saved · ends with {value[-4:]}"}
     else:
-        record.secret_ciphertext = None
-        record.details = {"label": value, "value": value}
-    record.status = "active"
-    db.add(record)
-    db.commit()
-    return record
+        ciphertext = None
+        details = {"label": value, "value": value}
+
+    def update(record: Connection) -> None:
+        record.method = "manual"
+        record.nango_integration = record.nango_connection_id = None
+        record.secret_ciphertext = ciphertext
+        record.details = details
+
+    return _store(svc, db, user, connector_id, update)
 
 
 def read_secret(svc: AppServices, user: User, record: Connection) -> str:
@@ -204,15 +238,32 @@ def read_secret(svc: AppServices, user: User, record: Connection) -> str:
 # ----------------------------------------------------------------------------- shared
 
 
+def save_fake(svc: AppServices, db: Session, user: User, connector_id: str) -> Connection:
+    """Fake-platform mode: mark an account as connected with demo data."""
+    connector(svc, connector_id)
+    details: dict[str, Any] = {"label": f"{user.username} (demo data)", "value": "fake-value"}
+    if connector_id == "slack":
+        details |= {"slack_user_id": f"UFAKE{user.id:04d}", "team_name": "Demo workspace"}
+
+    def update(record: Connection) -> None:
+        record.method = "fake"
+        record.nango_integration = record.nango_connection_id = None
+        record.secret_ciphertext = None
+        record.details = details
+
+    return _store(svc, db, user, connector_id, update)
+
+
 def delete(svc: AppServices, db: Session, user: User, connector_id: str) -> None:
     connector(svc, connector_id)
     record = get_connection(db, user, connector_id)
     if record is None:
         return
-    if record.method == "nango":
-        _delete_in_nango(svc, record)
+    removed = _nango_ref(record)
     db.delete(record)
     db.commit()
+    if removed:
+        _delete_in_nango(svc, *removed)
 
 
 def slack_channels(svc: AppServices, db: Session, user: User) -> list[dict[str, str]]:

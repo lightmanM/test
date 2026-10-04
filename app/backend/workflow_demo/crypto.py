@@ -39,8 +39,8 @@ class SecretBox:
         version, _, payload = token.partition(":")
         if version != VERSION:
             raise CryptoError("unknown ciphertext version")
-        raw = base64.b64decode(payload)
         try:
+            raw = base64.b64decode(payload, validate=True)
             return self._aead.decrypt(raw[:12], raw[12:], context.encode()).decode()
-        except InvalidTag:
-            raise CryptoError("ciphertext doesn't match its owner or key") from None
+        except (InvalidTag, binascii.Error, ValueError):
+            raise CryptoError("ciphertext is damaged or doesn't match its owner or key") from None

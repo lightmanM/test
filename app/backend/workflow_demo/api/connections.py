@@ -19,10 +19,13 @@ class SessionOut(BaseModel):
     token: str
     expires_at: str
     integration: str
+    api_url: str  # where the Connect UI reaches Nango (NANGO_HOST)
+    connect_url: str  # where the Connect UI itself is served
 
 
 class CompleteRequest(BaseModel):
-    connection_id: str = Field(min_length=1, max_length=200)
+    # Nango connection IDs are UUIDs; anything path-like is refused before reaching Nango.
+    connection_id: str = Field(max_length=200, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:@-]*$")
 
 
 class SecretRequest(BaseModel):
@@ -95,28 +98,13 @@ def delete_connection(connector_id: str, svc: Services, db: DB, user: CurrentUse
 
 @router.post("/api/connections/{connector_id}/fake", response_model=ConnectionOut)
 def fake_connect(connector_id: str, svc: Services, db: DB, user: CurrentUser) -> ConnectionOut:
-    """Fake-platform mode only: mark a popup connector as connected with demo data."""
+    """Fake-platform mode only: mark an account as connected with demo data."""
     if not svc.settings.fake_platforms:
         raise HTTPException(404, "Not available")
     try:
-        svc_connections.connector(svc, connector_id)
+        record = svc_connections.save_fake(svc, db, user, connector_id)
     except ConnectionError_ as exc:
         _raise(exc)
-    record = svc_connections.get_connection(db, user, connector_id) or Connection(
-        user_id=user.id, connector=connector_id
-    )
-    record.method = "fake"
-    record.status = "active"
-    record.secret_ciphertext = None
-    record.details = {"label": f"{user.username} (demo data)", "value": "fake-value"}
-    if connector_id == "slack":
-        record.details = {
-            **record.details,
-            "slack_user_id": f"UFAKE{user.id:04d}",
-            "team_name": "Demo workspace",
-        }
-    db.add(record)
-    db.commit()
     return connection_out(svc, record)
 
 

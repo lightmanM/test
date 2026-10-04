@@ -76,6 +76,11 @@ Stored details (never tokens): Slack team, `slack_user_id`, `bot_user_id`; Googl
 call `fresh_credentials()` (Nango refreshes) and `read_secret()`. Manual values: `PUT …/secret`; secret ones are
 shown only as "saved · ends with 1234". `GET /api/slack/channels` feeds the settings picker (falls back to an ID box).
 Without `NANGO_SECRET_KEY`, fake mode keeps the demo-data button; `/api/health` reports `nango_enabled`.
+Review fixes: rows are saved before the replaced Nango connection is deleted (`_store`), and a concurrent first save
+retries as an update; the secret-storage check runs before any change; connection IDs are validated and URL-escaped;
+unexpected Nango responses become clean errors; damaged ciphertexts raise `CryptoError`; the refresh token is never
+requested; the Connect UI uses the server's `NANGO_HOST` / `NANGO_CONNECT_URL`; one shared, closed HTTP client;
+`.env.example` has no real key.
 - [x] Nango connect session + verify tags + store connection; Slack channel picker
 - [x] Manual secrets (Meegle token, user key) with AES-GCM
 - [x] Tests with mocked Nango (respx), Connect UI unit tests, E2E for the token and user-key forms
@@ -124,7 +129,7 @@ Without `NANGO_SECRET_KEY`, fake mode keeps the demo-data button; `/api/health` 
 | 2026-10-04 | Leaked Meegle token removed from git history (2 commits rewritten; `main` now at e7c40dc). Owner to revoke the token in Meegle. |
 
 ## Session log
-- 2026-10-04: PR #3 (P1b) merged. P2 implemented: 83 backend tests, 8 unit + 5 E2E (frontend).
+- 2026-10-04: PR #3 (P1b) merged. P2 implemented and reviewed (10 findings fixed): 88 backend tests, 8 unit + 5 E2E (frontend).
 - 2026-10-04: PR #2 (P1a) merged. P1b implemented: 4 E2E + 3 unit (frontend), 70 backend tests.
 - 2026-10-04: PR #1 (P0) reviewed, fixed, CI green, merged. P1a implemented, reviewed (10 findings fixed): 69 tests passing.
 - 2026-10-04: P0 implemented (catalog, template fixes, compile script, setup guide, CI); 20 tests passing.

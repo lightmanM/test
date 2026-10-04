@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     # Connections
     nango_secret_key: SecretStr | None = None
     nango_host: str = "https://api.nango.dev"
+    nango_connect_url: str = "https://connect.nango.dev"  # Connect UI (only differs when self-hosting)
     # 32 random bytes, base64 (python -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())")
     data_encryption_key: SecretStr | None = None
 

@@ -95,6 +95,8 @@ export interface ConnectSession {
   token: string
   expires_at: string
   integration: string
+  api_url: string
+  connect_url: string
 }
 
 export interface SlackChannel {

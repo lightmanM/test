@@ -6,15 +6,16 @@ type OnEvent = (event: { type: string; payload?: unknown }) => Promise<void> | v
 
 const ui = vi.hoisted(() => ({
   onEvent: null as OnEvent | null,
-  setSessionToken: vi.fn(),
+  props: null as Record<string, unknown> | null,
   close: vi.fn(),
 }))
 
 vi.mock('@nangohq/frontend', () => ({
   default: class {
-    openConnectUI({ onEvent }: { onEvent: OnEvent }) {
+    openConnectUI({ onEvent, ...props }: { onEvent: OnEvent }) {
       ui.onEvent = onEvent
-      return { setSessionToken: ui.setSessionToken, close: ui.close }
+      ui.props = props
+      return { close: ui.close }
     }
   },
 }))
@@ -24,9 +25,15 @@ const opened = () => vi.waitFor(() => expect(ui.onEvent).not.toBeNull())
 beforeEach(() => {
   vi.restoreAllMocks()
   ui.onEvent = null
-  ui.setSessionToken.mockReset()
+  ui.props = null
   ui.close.mockReset()
-  vi.spyOn(api, 'startSession').mockResolvedValue({ token: 'tok', expires_at: '', integration: 'slack' })
+  vi.spyOn(api, 'startSession').mockResolvedValue({
+    token: 'tok',
+    expires_at: '',
+    integration: 'slack',
+    api_url: 'https://nango.example',
+    connect_url: 'https://connect.nango.example',
+  })
 })
 
 describe('connectWithNango', () => {
@@ -34,7 +41,11 @@ describe('connectWithNango', () => {
     const complete = vi.spyOn(api, 'completeSession').mockResolvedValue({})
     const result = connectWithNango('slack')
     await opened()
-    await vi.waitFor(() => expect(ui.setSessionToken).toHaveBeenCalledWith('tok'))
+    expect(ui.props).toEqual({
+      sessionToken: 'tok',
+      apiURL: 'https://nango.example',
+      baseURL: 'https://connect.nango.example',
+    })
     await ui.onEvent!({ type: 'connect', payload: { providerConfigKey: 'slack', connectionId: 'conn-1' } })
     await ui.onEvent!({ type: 'close' })
     await expect(result).resolves.toBe(true)
@@ -60,10 +71,10 @@ describe('connectWithNango', () => {
     await expect(result).resolves.toBe(true)
   })
 
-  it('closes the dialog and rejects when the session cannot start', async () => {
+  it('rejects without opening the dialog when the session cannot start', async () => {
     vi.spyOn(api, 'startSession').mockRejectedValue(new Error('Nango is down'))
     await expect(connectWithNango('slack')).rejects.toThrow('Nango is down')
-    expect(ui.close).toHaveBeenCalled()
+    expect(ui.onEvent).toBeNull()
   })
 
   it('rejects when saving fails', async () => {

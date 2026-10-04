@@ -6,7 +6,10 @@ import { api } from './api'
  */
 export async function connectWithNango(connector: string): Promise<boolean> {
   // Loaded on demand: most visits never open the dialog.
-  const { default: Nango } = await import('@nangohq/frontend')
+  const [{ default: Nango }, session] = await Promise.all([
+    import('@nangohq/frontend'),
+    api.startSession(connector),
+  ])
   return new Promise((resolve, reject) => {
     let settled = false
     let saving = false
@@ -16,8 +19,11 @@ export async function connectWithNango(connector: string): Promise<boolean> {
         fn()
       }
     }
-    // Open first so the dialog appears immediately; the session token follows.
     const ui = new Nango().openConnectUI({
+      // The server says where Nango lives (NANGO_HOST), so a self-hosted Nango works too.
+      apiURL: session.api_url,
+      baseURL: session.connect_url,
+      sessionToken: session.token,
       onEvent: async (event) => {
         if (event.type === 'connect') {
           saving = true
@@ -33,12 +39,5 @@ export async function connectWithNango(connector: string): Promise<boolean> {
         }
       },
     })
-    api.startSession(connector).then(
-      (session) => ui.setSessionToken(session.token),
-      (err) => {
-        ui.close()
-        finish(() => reject(err))
-      },
-    )
   })
 }

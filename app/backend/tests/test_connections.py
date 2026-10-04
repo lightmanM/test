@@ -49,6 +49,9 @@ def test_secret_box_round_trip_and_binding():
         box.decrypt(token, "user:2:connector:meegle_mcp_token")
     with pytest.raises(CryptoError):
         SecretBox(base64.b64encode(b"short").decode())
+    for damaged in ("v1:abc", "v1:", "v1:" + base64.b64encode(b"x").decode(), "v2:" + token[3:]):
+        with pytest.raises(CryptoError):
+            box.decrypt(damaged, "user:1:connector:meegle_mcp_token")
 
 
 @respx.mock
@@ -61,7 +64,13 @@ def test_slack_connect_flow(live):
     )
     resp = client.post("/api/connections/slack/session")
     assert resp.status_code == 200
-    assert resp.json() == {"token": "sess-1", "expires_at": "2026-10-04T06:00:00Z", "integration": "slack"}
+    assert resp.json() == {
+        "token": "sess-1",
+        "expires_at": "2026-10-04T06:00:00Z",
+        "integration": "slack",
+        "api_url": NANGO,
+        "connect_url": "https://connect.nango.dev",
+    }
     sent = session.calls.last.request
     assert sent.headers["authorization"] == "Bearer nango-secret"
     assert b'"end_user_id":"alice"' in sent.content and b'"allowed_integrations":["slack"]' in sent.content
@@ -113,6 +122,94 @@ def test_google_connect_reads_email_and_reconnect_replaces_old(live):
     assert deleted.called
     with svc.db.session() as db:
         assert db.query(Connection).one().nango_connection_id == "g-2"
+
+
+@respx.mock
+def test_reconnect_keeps_old_connection_if_saving_fails(live, monkeypatch):
+    svc, client = live
+    for cid in ("s-1", "s-2"):
+        respx.get(f"{NANGO}/connections/{cid}").mock(
+            return_value=httpx.Response(200, json=nango_connection(cid, "slack", "alice"))
+        )
+    deleted = respx.delete(url__regex=rf"{NANGO}/connections/.*").mock(return_value=httpx.Response(200))
+    client.post("/api/connections/slack/complete", json={"connection_id": "s-1"})
+
+    from sqlalchemy.orm import Session
+
+    def broken_commit(self):
+        raise RuntimeError("database went away")
+
+    monkeypatch.setattr(Session, "commit", broken_commit)
+    with pytest.raises(RuntimeError):
+        client.post("/api/connections/slack/complete", json={"connection_id": "s-2"})
+    monkeypatch.undo()
+    assert not deleted.called
+    with svc.db.session() as db:
+        assert db.query(Connection).one().nango_connection_id == "s-1"
+
+
+@respx.mock
+def test_concurrent_first_connect_retries_as_update(live, monkeypatch):
+    svc, client = live
+    respx.get(f"{NANGO}/connections/s-2").mock(
+        return_value=httpx.Response(200, json=nango_connection("s-2", "slack", "alice"))
+    )
+    deleted = respx.delete(f"{NANGO}/connections/s-1").mock(return_value=httpx.Response(200))
+    from workflow_demo.services import connections as svc_connections
+
+    real_get = svc_connections.get_connection
+    calls = {"n": 0}
+
+    def racing_get(db, user, connector_id):
+        calls["n"] += 1
+        if calls["n"] == 1:  # another request stores s-1 between our read and our insert
+            with svc.db.session() as other:
+                other.add(
+                    Connection(
+                        user_id=user.id,
+                        connector=connector_id,
+                        method="nango",
+                        nango_integration="slack",
+                        nango_connection_id="s-1",
+                        details={},
+                    )
+                )
+                other.commit()
+            return None
+        return real_get(db, user, connector_id)
+
+    monkeypatch.setattr(svc_connections, "get_connection", racing_get)
+    assert client.post("/api/connections/slack/complete", json={"connection_id": "s-2"}).status_code == 200
+    assert deleted.called
+    with svc.db.session() as db:
+        assert db.query(Connection).one().nango_connection_id == "s-2"
+
+
+@respx.mock
+def test_connection_ids_are_validated_and_escaped(live):
+    svc, client = live
+    for bad in ("../connect/sessions", "..", "a/b", "x?y=1", ""):
+        resp = client.post("/api/connections/slack/complete", json={"connection_id": bad})
+        assert resp.status_code == 422, bad
+    weird = respx.get(f"{NANGO}/connections/a%3Ab").mock(return_value=httpx.Response(200, json={"id": 1}))
+    resp = client.post("/api/connections/slack/complete", json={"connection_id": "a:b"})
+    assert weird.called
+    assert resp.status_code == 502 and "unexpected" in resp.json()["detail"]
+
+
+@respx.mock
+def test_credentials_never_request_the_refresh_token(live):
+    svc, client = live
+    route = respx.get(f"{NANGO}/connections/conn-1").mock(
+        return_value=httpx.Response(200, json=nango_connection("conn-1", "slack", "alice"))
+    )
+    client.post("/api/connections/slack/complete", json={"connection_id": "conn-1"})
+    with svc.db.session() as db:
+        from workflow_demo.services.connections import fresh_credentials
+
+        assert fresh_credentials(svc, db.query(Connection).one()).access_token == "tok"
+    for call in route.calls:
+        assert "refresh_token" not in call.request.url.params
 
 
 @respx.mock
@@ -177,6 +274,14 @@ def test_endpoints_report_missing_configuration(client, login):
     assert client.post("/api/connections/slack/session").status_code == 503
     resp = client.put("/api/connections/meegle_mcp_token/secret", json={"value": "m-AB-1234-abcd"})
     assert resp.status_code == 503
+    assert client.get("/api/connections").json() == []
+
+
+def test_empty_keys_leave_features_off(make_settings):
+    from workflow_demo.app import build_services
+
+    svc = build_services(make_settings(nango_secret_key="", data_encryption_key=""))
+    assert svc.nango is None and svc.secret_box is None
 
 
 @respx.mock

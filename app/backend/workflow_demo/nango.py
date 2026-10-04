@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -60,43 +61,52 @@ class NangoClient:
             raise NangoError(
                 f"Nango error {resp.status_code}: {message or 'request failed'}", resp.status_code
             )
-        return resp.json() if resp.content else {}
+        try:
+            return resp.json() if resp.content else {}
+        except ValueError:
+            raise NangoError("Nango returned a response that isn't JSON") from None
 
     def create_connect_session(self, integration: str, tags: dict[str, str]) -> ConnectSession:
         data = self._request(
             "POST", "/connect/sessions", json={"tags": tags, "allowed_integrations": [integration]}
-        )["data"]
-        return ConnectSession(
-            token=data["token"], expires_at=data["expires_at"], connect_link=data.get("connect_link")
         )
+        try:
+            data = data["data"]
+            return ConnectSession(
+                token=data["token"], expires_at=data["expires_at"], connect_link=data.get("connect_link")
+            )
+        except (KeyError, TypeError):
+            raise NangoError("Nango returned an unexpected connect session") from None
 
     def get_connection(
-        self,
-        connection_id: str,
-        integration: str,
-        *,
-        force_refresh: bool = False,
-        refresh_token: bool = False,
+        self, connection_id: str, integration: str, *, force_refresh: bool = False
     ) -> NangoConnection:
+        """Read a connection. Nango refreshes an expired access token itself; ``force_refresh``
+        refreshes regardless. The refresh token is never requested."""
         params = {"provider_config_key": integration}
         if force_refresh:
             params["force_refresh"] = "true"
-        if refresh_token:
-            params["refresh_token"] = "true"
-        data = self._request("GET", f"/connections/{connection_id}", params=params)
-        return NangoConnection(
-            connection_id=data["connection_id"],
-            provider_config_key=data["provider_config_key"],
-            provider=data.get("provider"),
-            tags=data.get("tags") or {},
-            credentials=data.get("credentials") or {},
-        )
+        data = self._request("GET", _connection_path(connection_id), params=params)
+        try:
+            return NangoConnection(
+                connection_id=data["connection_id"],
+                provider_config_key=data["provider_config_key"],
+                provider=data.get("provider"),
+                tags=data.get("tags") or {},
+                credentials=data.get("credentials") or {},
+            )
+        except (KeyError, TypeError):
+            raise NangoError("Nango returned an unexpected connection") from None
 
     def delete_connection(self, connection_id: str, integration: str) -> None:
         try:
             self._request(
-                "DELETE", f"/connections/{connection_id}", params={"provider_config_key": integration}
+                "DELETE", _connection_path(connection_id), params={"provider_config_key": integration}
             )
         except NangoError as exc:
             if exc.status_code != 404:
                 raise
+
+
+def _connection_path(connection_id: str) -> str:
+    return f"/connections/{quote(connection_id, safe='')}"

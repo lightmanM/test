@@ -14,7 +14,7 @@ from workflow_demo.api.schemas import (
     WorkflowSummary,
 )
 from workflow_demo.catalog.models import ConnectorKind, Platform, WorkflowEntry
-from workflow_demo.db import Connection, Deployment, User
+from workflow_demo.db import Connection, Deployment
 from workflow_demo.services import deployments as svc_deployments
 from workflow_demo.services.container import AppServices
 from workflow_demo.services.states import Status
@@ -38,10 +38,6 @@ def deployment_out(dep: Deployment | None, with_events: bool = False) -> Deploym
         if with_events
         else [],
     )
-
-
-def active_connections(user: User) -> dict[str, Connection]:
-    return {c.connector: c for c in user.connections if c.status == "active"}
 
 
 def summary(svc: AppServices, entry: WorkflowEntry, active: dict[str, Connection]) -> dict:
@@ -80,7 +76,7 @@ def summary(svc: AppServices, entry: WorkflowEntry, active: dict[str, Connection
 @router.get("/workflows", response_model=list[WorkflowSummary])
 def list_workflows(svc: Services, db: DB, user: CurrentUser) -> list[WorkflowSummary]:
     deps = {d.workflow_id: d for d in user.deployments}
-    active = active_connections(user)
+    active = svc_deployments.active_connections(user)
     return [
         WorkflowSummary(**summary(svc, entry, active), deployment=deployment_out(deps.get(entry.id)))
         for entry in svc.catalog.workflows
@@ -95,7 +91,7 @@ def get_workflow(workflow_id: str, svc: Services, db: DB, user: CurrentUser) -> 
         raise HTTPException(404, "Unknown workflow") from None
     dep = svc_deployments.get_deployment(db, user, workflow_id)
     return WorkflowDetail(
-        **summary(svc, entry, active_connections(user)),
+        **summary(svc, entry, svc_deployments.active_connections(user)),
         deployment=deployment_out(dep, with_events=True),
         description=entry.description,
         settings=[SettingOut(**s.model_dump(mode="json")) for s in entry.settings],
