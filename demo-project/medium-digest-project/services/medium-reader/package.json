@@ -1,0 +1,14 @@
+{
+  "name": "medium-freedium-reader",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "cloakbrowser": "0.5.11",
+    "playwright-core": "1.63.0"
+  }
+}

@@ -1,0 +1,19 @@
+services:
+  medium-reader:
+    build: .
+    container_name: medium-freedium-reader
+    restart: unless-stopped
+    environment:
+      FREEDIUM_BASE_URL: ${FREEDIUM_BASE_URL:-https://freedium-mirror.cfd}
+      MIN_CONTENT_CHARACTERS: ${MIN_CONTENT_CHARACTERS:-400}
+      HEADLESS: ${HEADLESS:-true}
+      API_TOKEN: ${API_TOKEN:-}
+    ports:
+      - "127.0.0.1:8000:8000"
+    init: true
+    shm_size: "1gb"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/healthz >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
