@@ -3,9 +3,9 @@
 Living document. Update at the end of every work session and every PR.
 
 ## Current status
-- **Phase**: P7 Go live — packaging in review; the live part waits on the owner's credentials.
-- **Next step**: merge the P7 PR; then the owner provides the accounts and keys (plan §15) and we run
-  `docs/go-live.md` together.
+- **Phase**: P0–P6 done; P7 packaging merged ([#9](https://github.com/lightmanM/test/pull/9)). The live part of P7 is next.
+- **Next step**: the owner provides the accounts and keys (plan §15); then run `docs/go-live.md` together
+  (deploy services + demo, setup check, live checklist) and mark P7 done.
 - **Blocked on owner**: credentials for P7 (plan §15).
 
 ## Phases and PRs
@@ -20,7 +20,7 @@ Living document. Update at the end of every work session and every PR.
 | P4 Modal services | [#6](https://github.com/lightmanM/test/pull/6) | merged | reader + bot on Modal, bot patches, "Activate for me" |
 | P5 Make Bridge | [#7](https://github.com/lightmanM/test/pull/7) | merged | Bridge adapter, popup + callback, unavailable state |
 | P6 Lifecycle & admin | [#8](https://github.com/lightmanM/test/pull/8) | merged | 24 h sweeper, redeploy/delete, admin page, setup check, E2E |
-| P7 Go live | #9 | in review (packaging); live part waits on owner | Modal + Neon deploy, owner credentials, live checklist |
+| P7 Go live | [#9](https://github.com/lightmanM/test/pull/9) | packaging merged; live part waits on owner | Modal + Neon deploy, owner credentials, live checklist |
 
 ## Phase checklists
 
@@ -197,6 +197,7 @@ busy. Settings come from the Modal secret `workflow-demo-app`
 | 2026-10-04 | Leaked Meegle token removed from git history (2 commits rewritten; `main` now at e7c40dc). Owner to revoke the token in Meegle. |
 
 ## Session log
+- 2026-10-04: PR #9 (P7 packaging) merged — all 9 PRs in. Remaining: the live go-live run with the owner's credentials.
 - 2026-10-04: PR #8 (P6) merged. P7 packaging: Modal app for the demo, production settings template, go-live guide; reviewed (10 findings fixed), 157 backend tests.
 - 2026-10-04: PR #7 (P5) merged. P6 implemented and reviewed (10 findings fixed): 156 backend tests, 5 E2E (admin lifecycle).
 - 2026-10-04: PR #6 (P4) merged. P5 implemented and reviewed (10 findings fixed): 143 backend tests (Bridge client + adapter contract, API popup flow).
