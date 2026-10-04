@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Test
+        run: pytest -q
+      - name: Catalog templates are up to date
+        working-directory: .
+        run: python scripts/build_catalog.py --check
+
+  meegle-sdk-compile:
+    # The Meegle digest template is built from a committed compile of the team's Workflow-SDK
+    # code; recompile it to catch edits to the SDK source that weren't recompiled.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: npm ci --prefix scripts
+      - run: pip install pydantic pyyaml
+      - run: |
+          node scripts/compile_n8n_sdk.mjs \
+            demo-project/meegle-daily-digest/meegle-daily-digest.n8n-cloud-sdk.js /tmp/compiled.json
+          python scripts/build_catalog.py --check-compiled /tmp/compiled.json

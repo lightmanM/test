@@ -1,0 +1,42 @@
+# Connectors a tester can connect in the demo. Workflows list the ones they need.
+slack:
+  name: Slack
+  kind: nango
+  integration: slack
+  description: >-
+    Your Slack workspace. Gives the demo a bot token to post to the channels you choose, and
+    your Slack user ID.
+
+google:
+  name: Google (Sheets and Gmail)
+  kind: nango
+  integration: google
+  description: >-
+    Your company Google account. Used to create and update a spreadsheet in your Drive and
+    to read Medium emails in your Gmail (read-only).
+
+meegle_mcp_token:
+  name: Meegle MCP token
+  kind: manual
+  secret: true
+  description: Lets the digest read work items from your Meegle space through Meegle's MCP server.
+  help: >-
+    Ask your Meegle admin for an MCP token (it looks like m-AB-xxxxxxxx-...). It is stored
+    encrypted and only used to create the deployment's credential.
+
+meegle_user_key:
+  name: Meegle user key
+  kind: manual
+  secret: false
+  description: Links your Slack user to your Meegle account so the bot can make you a card's owner.
+  help: In Meegle, double-click your avatar to copy your user_key.
+
+make_github:
+  name: GitHub (in Make)
+  kind: platform_popup
+  description: Connected inside Make's popup during deploy. Make stores this connection.
+
+make_slack:
+  name: Slack (in Make)
+  kind: platform_popup
+  description: Connected inside Make's popup during deploy. Make stores this connection.

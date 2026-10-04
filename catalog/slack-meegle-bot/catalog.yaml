@@ -1,0 +1,21 @@
+id: slack-meegle-bot
+name: Slack → Meegle card bot
+summary: Mention the bot in Slack to create a Meegle card; it replies with the card link.
+description: |
+  A shared Slack bot: `@bot <title> @owner` in any channel the bot is in creates a Meegle card
+  with you (and anyone you mention) as owner, and replies in the thread with the link. The bot
+  runs once for everyone; "Activate for me" links your Slack user to your Meegle user key.
+platform: modal
+source: demo-project/slark-meegle-bot
+connectors:
+  - id: slack
+    purpose: Identifies your Slack user (no messages are sent on your behalf).
+  - id: meegle_user_key
+    purpose: Makes you the owner of cards you create.
+try_it: |
+  Invite the bot to a channel (`/invite @bot`), then send `@bot Fix login page error @you`.
+  The bot replies in the thread with the new card's link, and the card is listed below.
+run_now: false
+modal:
+  service: slack-meegle-bot
+  shared_deployment: true

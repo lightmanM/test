@@ -1,0 +1,543 @@
+{
+  "name": "Medium digest (demo)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "4b3b5f20-4a54-4a8d-a52e-5c8b1c0bb001",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "freedium-endpoint",
+              "name": "freediumEndpoint",
+              "type": "string",
+              "value": "__VALUE:reader_url__"
+            },
+            {
+              "id": "llm-endpoint",
+              "name": "llmEndpoint",
+              "type": "string",
+              "value": "__VALUE:llm_endpoint__"
+            },
+            {
+              "id": "llm-model",
+              "name": "llmModel",
+              "type": "string",
+              "value": "__VALUE:llm_model__"
+            },
+            {
+              "id": "slack-channel",
+              "name": "slackChannel",
+              "type": "string",
+              "value": "__VALUE:slack_channel__"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4b3b5f20-4a54-4a8d-a52e-5c8b1c0bb002",
+      "name": "Workflow configuration",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const now = new Date();\nconst receivedAfterDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);\nconst iso = (value) => value.toISOString();\n\nreturn [{\n  json: {\n    receivedAfter: iso(receivedAfterDate),\n    receivedBefore: iso(now),\n    windowLabel: `${iso(receivedAfterDate).slice(0, 16)} to ${iso(now).slice(0, 16)} UTC`,\n    gmailSearch: 'Medium',\n  },\n}];\n\n"
+      },
+      "id": "4b3b5f20-4a54-4a8d-a52e-5c8b1c0bb003",
+      "name": "Build rolling 7-day window",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "getAll",
+        "returnAll": true,
+        "simple": false,
+        "filters": {
+          "q": "={{ $('Build rolling 7-day window').first().json.gmailSearch }}",
+          "readStatus": "both",
+          "receivedAfter": "={{ $('Build rolling 7-day window').first().json.receivedAfter }}",
+          "receivedBefore": "={{ $('Build rolling 7-day window').first().json.receivedBefore }}"
+        }
+      },
+      "id": "4b3b5f20-4a54-4a8d-a52e-5c8b1c0bb004",
+      "name": "Find Medium Daily Digest emails",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        680,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "slot:google",
+          "name": "google"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const items = $input.all();\nconst links = new Map();\nlet bodyCount = 0;\nlet candidateCount = 0;\nlet parseFailureCount = 0;\nlet rejectedCount = 0;\nconst blockedHosts = new Set([\n  'mail.google.com',\n  'support.google.com',\n  'help.medium.com',\n  'about.medium.com',\n  'twitter.com',\n  'x.com',\n  'facebook.com',\n  'linkedin.com',\n]);\n\nfunction decodeHtml(value) {\n  return value\n    .replace(/&amp;/g, '&')\n    .replace(/&quot;/g, '\"')\n    .replace(/&#39;|&apos;/g, \"'\")\n    .replace(/&lt;/g, '<')\n    .replace(/&gt;/g, '>');\n}\n\nfunction decodeBase64Url(value) {\n  try {\n    return Buffer.from(value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - value.length % 4) % 4), 'base64').toString('utf8');\n  } catch {\n    return '';\n  }\n}\n\nfunction collectPayloadText(part, output) {\n  if (!part || typeof part !== 'object') return;\n  const mimeType = String(part.mimeType || '').toLowerCase();\n  const data = part.body?.data;\n  if (data && (mimeType === 'text/html' || mimeType === 'text/plain')) output.push(decodeBase64Url(data));\n  for (const child of part.parts || []) collectPayloadText(child, output);\n}\n\nfunction cleanText(value) {\n  return (value || '').replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim();\n}\n\nfunction getEmailTimestamp(message) {\n  const rawValue = message.internalDate ?? message.date ?? message.headers?.date;\n  if (typeof rawValue === 'number' && Number.isFinite(rawValue)) return rawValue;\n  const rawText = String(rawValue || '').replace(/^Date:\\s*/i, '').trim();\n  const timestamp = Date.parse(rawText);\n  return Number.isFinite(timestamp) ? timestamp : 0;\n}\n\nfunction isArticleUrl(parsed, anchorText) {\n  const host = parsed.hostname.toLowerCase();\n  const parts = parsed.pathname.split('/').filter(Boolean);\n  if (blockedHosts.has(host) || parts.length === 0) return false;\n\n  const lastPart = parts.at(-1) || '';\n  const hasMediumArticleId = /-[a-f0-9]{8,}$/i.test(lastPart);\n  const isMediumHost = host === 'medium.com' || host.endsWith('.medium.com');\n  if (isMediumHost) return parts.length >= 2 && hasMediumArticleId;\n\n  const hasArticleLikeSlug = lastPart.length >= 24 && /[a-z]/i.test(lastPart);\n  return anchorText.length >= 20 || hasArticleLikeSlug || hasMediumArticleId;\n}\n\nfunction parseHttpUrl(rawHref) {\n  const match = rawHref.match(/^(https?):\\/\\/([^/?#]+)(\\/[^?#]*)?(\\?[^#]*)?(#.*)?$/i);\n  if (!match) return null;\n  const hostPort = match[2].split('@').pop();\n  const hostname = hostPort.replace(/^\\[|\\]$/g, '').split(':')[0].toLowerCase();\n  return {\n    protocol: `${match[1].toLowerCase()}:`,\n    hostname,\n    pathname: match[3] || '/',\n    query: (match[4] || '').slice(1),\n  };\n}\n\nfunction normaliseUrl(rawHref) {\n  const href = decodeHtml(rawHref).replace(/[),.;]+$/, '');\n  const parsed = parseHttpUrl(href);\n  if (!parsed || !['http:', 'https:'].includes(parsed.protocol)) return null;\n  const keptQuery = parsed.query\n    .split('&')\n    .filter(Boolean)\n    .filter((part) => !/^(utm_|source|ref|sk)/i.test(part.split('=')[0]))\n    .join('&');\n  return {\n    parsed,\n    url: `${parsed.protocol}//${href.match(/^(https?):\\/\\/([^/?#]+)/i)[2]}${parsed.pathname}${keptQuery ? `?${keptQuery}` : ''}`,\n  };\n}\n\nfunction addLink(rawHref, rawText, emailDate, emailTimestamp) {\n  candidateCount += 1;\n  try {\n    const normalised = normaliseUrl(rawHref);\n    if (!normalised) {\n      rejectedCount += 1;\n      return;\n    }\n    const { parsed, url } = normalised;\n    const anchorText = cleanText(rawText);\n    if (!isArticleUrl(parsed, anchorText)) {\n      rejectedCount += 1;\n      return;\n    }\n    const existing = links.get(url);\n    if (!existing || emailTimestamp >= existing.emailTimestamp) {\n      links.set(url, {\n        digestTitle: anchorText || url,\n        emailDate,\n        emailTimestamp,\n      });\n    }\n  } catch {\n    parseFailureCount += 1;\n  }\n}\n\nfor (const item of items) {\n  const bodies = [];\n  const topLevel = item.json || {};\n  const emailTimestamp = getEmailTimestamp(topLevel);\n  const emailDate = emailTimestamp ? new Date(emailTimestamp).toISOString() : null;\n  for (const value of [topLevel.html, topLevel.textAsHtml, topLevel.text, topLevel.snippet]) {\n    if (typeof value === 'string') bodies.push(value);\n  }\n  collectPayloadText(topLevel.payload, bodies);\n  for (const body of bodies) {\n    bodyCount += 1;\n    const anchorPattern = /<a\\b[^>]*href=[\\\"']([^\\\"']+)[\\\"'][^>]*>([\\s\\S]*?)<\\/a>/gi;\n    for (const match of body.matchAll(anchorPattern)) addLink(match[1], match[2], emailDate, emailTimestamp);\n    for (const match of body.matchAll(/https?:\\/\\/[^\\s<>\\\"']+/g)) addLink(match[0], '', emailDate, emailTimestamp);\n  }\n}\n\nconst articles = [...links.entries()]\n  .sort(([, left], [, right]) => right.emailTimestamp - left.emailTimestamp)\n  .slice(0, 5)\n  .map(([url, details]) => ({\n    url,\n    digestTitle: details.digestTitle,\n    emailDate: details.emailDate,\n    emailTimestamp: details.emailTimestamp,\n    contentStatus: 'pending',\n  }));\n\nif (articles.length === 0) {\n  return [{ json: {\n    noArticles: true,\n    articleCount: 0,\n    debug: {\n      inputItems: items.length,\n      bodyCount,\n      candidateCount,\n      parseFailureCount,\n      rejectedCount,\n      bufferType: typeof Buffer,\n      firstItemKeys: Object.keys(items[0]?.json || {}),\n      firstItemHtmlType: typeof items[0]?.json?.html,\n      firstItemHtmlLength: typeof items[0]?.json?.html === 'string' ? items[0].json.html.length : 0,\n    },\n  } }];\n}\nreturn articles.map((article) => ({ json: { ...article, articleCount: articles.length } }));\n"
+      },
+      "id": "4b3b5f20-4a54-4a8d-a52e-5c8b1c0bb005",
+      "name": "Extract article links",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-articles",
+              "leftValue": "={{ $json.noArticles }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4b3b5f20-4a54-4a8d-a52e-5c8b1c0bb006",
+      "name": "Has article links",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Workflow configuration').first().json.freediumEndpoint }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ url: $json.url, timeoutMs: 45000 }) }}",
+        "options": {
+          "timeout": 60000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "4b3b5f20-4a54-4a8d-a52e-5c8b1c0bb007",
+      "name": "Fetch article through Freedium",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1400,
+        -120
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "continueOnFail": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "slot:reader",
+          "name": "reader"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "content-success",
+              "leftValue": "={{ $json.contentStatus }}",
+              "rightValue": "success",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4b3b5f20-4a54-4a8d-a52e-5c8b1c0bb008",
+      "name": "Article text available",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1640,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const sourceUrl = $json.sourceUrl || $json.url;\nconst sourceArticle = $('Extract article links').all()\n  .map((item) => item.json)\n  .find((article) => article.url === sourceUrl);\nconst content = ($json.content || '').slice(0, 60000);\nconst system = [\n  'You are an editor preparing a Chinese weekly report from Medium articles.',\n  'Return only valid JSON. Do not use Markdown fences.',\n  'Relevant topics are: llm_agent, vibe_coding, open_source.',\n  'Only set relevant=true when the article has substantial value for at least one topic.',\n  'Only include GitHub URLs that are explicitly present in the article text; never invent repositories.',\n  'Output schema: {relevant:boolean, topics:string[], summary:string, why_relevant:string, github_repositories:[{name:string,url:string}]}',\n].join('\\n');\n\nreturn { json: {\n  ...$json,\n  sourceUrl,\n  emailDate: $json.emailDate || sourceArticle?.emailDate || null,\n  emailTimestamp: $json.emailTimestamp || sourceArticle?.emailTimestamp || 0,\n  model: $('Workflow configuration').first().json.llmModel,\n  messages: [\n    { role: 'system', content: system },\n    { role: 'user', content: JSON.stringify({ title: $json.title || $json.digestTitle, sourceUrl, article: content }) },\n  ],\n} };\n"
+      },
+      "id": "4b3b5f20-4a54-4a8d-a52e-5c8b1c0bb009",
+      "name": "Prepare article for LLM",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1880,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Workflow configuration').first().json.llmEndpoint }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $json.model, temperature: 0.2, messages: $json.messages }) }}",
+        "options": {
+          "timeout": 60000
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi"
+      },
+      "id": "4b3b5f20-4a54-4a8d-a52e-5c8b1c0bb010",
+      "name": "Classify and summarize article",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2120,
+        -220
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "openAiApi": {
+          "id": "slot:openai",
+          "name": "openai"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const source = $('Prepare article for LLM').item.json;\nconst raw = $json.choices?.[0]?.message?.content;\nlet result = {};\ntry {\n  const cleaned = typeof raw === 'string' ? raw.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '') : '{}';\n  result = JSON.parse(cleaned);\n} catch (error) {\n  result = { relevant: false, topics: [], summary: '', why_relevant: `LLM JSON parse failed: ${error.message}`, github_repositories: [] };\n}\n\nreturn { json: {\n  sourceUrl: source.sourceUrl,\n  freediumUrl: source.freediumUrl,\n  title: source.title || source.digestTitle,\n  author: source.author || null,\n  emailDate: source.emailDate || null,\n  emailTimestamp: source.emailTimestamp || 0,\n  contentStatus: 'success',\n  relevant: result.relevant === true,\n  topics: Array.isArray(result.topics) ? result.topics : [],\n  summary: result.summary || '',\n  why_relevant: result.why_relevant || '',\n  github_repositories: Array.isArray(result.github_repositories) ? result.github_repositories : [],\n} };\n\n"
+      },
+      "id": "4b3b5f20-4a54-4a8d-a52e-5c8b1c0bb011",
+      "name": "Parse LLM result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2360,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const sourceUrl = $json.sourceUrl || $json.url;\nconst sourceArticle = $('Extract article links').all()\n  .map((item) => item.json)\n  .find((article) => article.url === sourceUrl);\n\nreturn { json: {\n  sourceUrl,\n  freediumUrl: $json.freediumUrl || null,\n  title: $json.title || sourceArticle?.digestTitle || 'Untitled article',\n  author: null,\n  emailDate: $json.emailDate || sourceArticle?.emailDate || null,\n  emailTimestamp: $json.emailTimestamp || sourceArticle?.emailTimestamp || 0,\n  contentStatus: 'failed',\n  relevant: false,\n  topics: [],\n  summary: '',\n  why_relevant: `Full text unavailable: ${$json.error || 'unknown error'}`,\n  github_repositories: [],\n} };\n\n"
+      },
+      "id": "4b3b5f20-4a54-4a8d-a52e-5c8b1c0bb012",
+      "name": "Record article fetch failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1880,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "append"
+      },
+      "id": "4b3b5f20-4a54-4a8d-a52e-5c8b1c0bb013",
+      "name": "Combine article outcomes",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [
+        2600,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const articles = $input.all().map((item) => item.json)\n  .sort((left, right) => {\n    const leftTime = Number(left.emailTimestamp) || Date.parse(left.emailDate || '') || 0;\n    const rightTime = Number(right.emailTimestamp) || Date.parse(right.emailDate || '') || 0;\n    return rightTime - leftTime;\n  });\nconst relevant = articles.filter((article) => article.relevant === true);\nconst byTopic = new Map();\nfor (const article of relevant) {\n  for (const topic of article.topics || []) {\n    if (!byTopic.has(topic)) byTopic.set(topic, []);\n    byTopic.get(topic).push(article);\n  }\n}\n\nconst sections = [];\nfor (const [topic, topicArticles] of byTopic) {\n  sections.push(`\\n## ${topic}\\n${topicArticles.map((article) => {\n    const repos = (article.github_repositories || []).map((repo) => `\\n  - GitHub: ${repo.name || repo.url} - ${repo.url}`).join('');\n    return `### ${article.title}\\n${article.summary || 'No summary'}\\n\\n${article.why_relevant || ''}\\n\\nSource: ${article.sourceUrl}${repos}`;\n  }).join('\\n\\n')}`);\n}\n\nconst failed = articles.filter((article) => article.contentStatus === 'failed');\nconst window = $('Build rolling 7-day window').first().json;\nconst emailCount = $('Find Medium Daily Digest emails').all().length;\nconst report = `# Medium Digest report\\n\\nWindow: ${window.windowLabel}\\nGmail messages matched: ${emailCount}\\nProcessed ${articles.length} articles; ${relevant.length} matched your topics.${sections.join('') || '\\nNo relevant articles found in the 7-day window.'}\\n\\n_Articles with unavailable full text: ${failed.length}._`;\nreturn [{ json: { report, emailCount, processed: articles.length, relevant: relevant.length, failed: failed.length } }];\n"
+      },
+      "id": "4b3b5f20-4a54-4a8d-a52e-5c8b1c0bb014",
+      "name": "Build Medium weekly report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2840,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const window = $('Build rolling 7-day window').first().json;\nconst emailCount = $('Find Medium Daily Digest emails').all().length;\nreturn [{ json: {\n  report: `# Medium Digest report\\n\\nWindow: ${window.windowLabel}\\nGmail messages matched: ${emailCount}\\nNo Medium article links were found in the 7-day email window.`,\n  emailCount,\n} }];\n"
+      },
+      "id": "4b3b5f20-4a54-4a8d-a52e-5c8b1c0bb015",
+      "name": "Build empty report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "accessToken",
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "mode": "id",
+          "value": "={{ $('Workflow configuration').first().json.slackChannel }}"
+        },
+        "text": "={{ $json.report }}",
+        "otherOptions": {
+          "mrkdwn": true,
+          "unfurl_links": false,
+          "unfurl_media": false
+        }
+      },
+      "id": "4b3b5f20-4a54-4a8d-a52e-5c8b1c0bb016",
+      "name": "Send report to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        3080,
+        -20
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "slot:slack",
+          "name": "slack"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Workflow configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow configuration": {
+      "main": [
+        [
+          {
+            "node": "Build rolling 7-day window",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Medium Daily Digest emails": {
+      "main": [
+        [
+          {
+            "node": "Extract article links",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract article links": {
+      "main": [
+        [
+          {
+            "node": "Has article links",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has article links": {
+      "main": [
+        [
+          {
+            "node": "Fetch article through Freedium",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build empty report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch article through Freedium": {
+      "main": [
+        [
+          {
+            "node": "Article text available",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Article text available": {
+      "main": [
+        [
+          {
+            "node": "Prepare article for LLM",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Record article fetch failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare article for LLM": {
+      "main": [
+        [
+          {
+            "node": "Classify and summarize article",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify and summarize article": {
+      "main": [
+        [
+          {
+            "node": "Parse LLM result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse LLM result": {
+      "main": [
+        [
+          {
+            "node": "Combine article outcomes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record article fetch failure": {
+      "main": [
+        [
+          {
+            "node": "Combine article outcomes",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Combine article outcomes": {
+      "main": [
+        [
+          {
+            "node": "Build Medium weekly report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Medium weekly report": {
+      "main": [
+        [
+          {
+            "node": "Send report to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build empty report": {
+      "main": [
+        [
+          {
+            "node": "Send report to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build rolling 7-day window": {
+      "main": [
+        [
+          {
+            "node": "Find Medium Daily Digest emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

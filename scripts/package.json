@@ -1,0 +1,9 @@
+{
+  "name": "workflow-demo-scripts",
+  "private": true,
+  "type": "module",
+  "description": "Build helpers for the workflow demo (compiles n8n Workflow-SDK code to JSON).",
+  "dependencies": {
+    "@n8n/workflow-sdk": "0.34.2"
+  }
+}

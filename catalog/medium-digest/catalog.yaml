@@ -1,0 +1,42 @@
+id: medium-digest
+name: Medium weekly digest
+summary: Finds Medium articles in your Gmail, summarizes the relevant ones with AI, and posts a report to Slack.
+description: |
+  Searches your Gmail for "Medium" emails from the last 7 days, extracts the article links,
+  fetches each article's text through the shared reader service, asks an AI model which ones
+  matter (LLM agents, vibe coding, open source) and summarizes them in Chinese, then posts the
+  report to Slack. Limited to the 5 newest articles per run.
+platform: n8n
+source: demo-project/medium-digest-project/workflow/medium-digest.workflow.json
+connectors:
+  - id: google
+    purpose: Reads Medium emails in your Gmail (read-only).
+  - id: slack
+    purpose: Posts the report to the channel you choose.
+settings:
+  - key: slack_channel
+    label: Slack channel for the report
+    type: slack_channel
+  - key: llm_model
+    label: AI model
+    type: select
+    options: [gpt-4o-mini, gpt-4o]
+    default: gpt-4o-mini
+try_it: |
+  Click **Run now**. After a minute or two the report appears in your Slack channel and below
+  under Results. If your inbox has no Medium emails from the last week you get an empty report.
+n8n:
+  template: workflow.json
+  values:
+    reader_url: shared
+    llm_endpoint: shared
+    llm_model: setting
+    slack_channel: setting
+  credentials:
+    google: {type: gmailOAuth2, source: connection, ref: google}
+    slack: {type: slackApi, source: connection, ref: slack}
+    openai: {type: openAiApi, source: shared, ref: openai}
+    reader: {type: httpHeaderAuth, source: shared, ref: reader}
+  result_nodes:
+    - Build Medium weekly report
+    - Build empty report

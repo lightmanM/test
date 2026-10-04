@@ -1,0 +1,21 @@
+id: github-merge-slack
+name: GitHub merge → Slack
+summary: Posts each merged pull request's commit diff from your GitHub repo to Slack.
+description: |
+  Watches a GitHub repository for merged pull requests, fetches the merge commit's diff, and
+  posts it to a Slack channel. Runs on Make; you connect GitHub and Slack, and pick the repo
+  and channel, inside Make's popup.
+platform: make
+source: demo-project/GitHub 合并提交 Diff 通知前端.blueprint.json
+connectors:
+  - id: make_github
+    purpose: Watches your repository for merged pull requests.
+  - id: make_slack
+    purpose: Posts the diff to your channel.
+try_it: |
+  Merge a pull request in the repository you chose, then click **Run now** within 20 minutes
+  (Make also checks every 15 minutes). The diff appears in your Slack channel, and the run shows
+  below. Only pull requests merged in the last 20 minutes are posted, so nothing is posted twice.
+make:
+  blueprint: blueprint.json
+  setup_doc: make-setup.md

@@ -1,0 +1,48 @@
+id: meegle-daily-digest
+name: Meegle daily digest
+summary: Summarizes your Meegle space's recent bugs and stories into a daily Slack report.
+description: |
+  Pulls bugs and stories updated in the chosen time window from your Meegle space (through
+  Meegle's MCP server), counts them by priority, highlights high-priority, blocked and stale
+  items, and posts a Chinese daily report to Slack. Scheduled for weekdays 09:00, and runs on
+  demand with Run now.
+platform: n8n
+source: demo-project/meegle-daily-digest/meegle-daily-digest.n8n-cloud-sdk.js
+connectors:
+  - id: meegle_mcp_token
+    purpose: Reads work items from your Meegle space.
+  - id: slack
+    purpose: Posts the report to the channel you choose.
+settings:
+  - key: slack_channel
+    label: Slack channel for the report
+    type: slack_channel
+  - key: meegle_project_key
+    label: Meegle project key
+    type: string
+    help: In Meegle, Settings → Basic information of your space.
+  - key: meegle_simple_name
+    label: Meegle space short name
+    type: string
+    help: The part after meegle.com/ in your space's URL.
+  - key: window_hours
+    label: Look-back window
+    type: select
+    options: [24, 168, 720]
+    default: 24
+    help: Hours of history to include. Use 720 (30 days) if your space is quiet.
+try_it: |
+  Click **Run now**. The report appears in your Slack channel, and its text is shown below under
+  Results.
+n8n:
+  template: workflow.json
+  values:
+    slack_channel: setting
+    window_hours: setting
+    meegle_project_key: setting
+    meegle_simple_name: setting
+  credentials:
+    meegle_mcp: {type: httpHeaderAuth, source: connection, ref: meegle_mcp_token}
+    slack: {type: slackApi, source: connection, ref: slack}
+  result_nodes:
+    - Compose digest
