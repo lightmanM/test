@@ -1,0 +1,350 @@
+{
+  "id": "meegle-daily-digest",
+  "name": "Meegle 团队研发进展每日汇总",
+  "nodes": [
+    {
+      "id": "80011371-0533-4225-88a1-9a3d7d6aa5b7",
+      "name": "Manual Trigger (demo)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        100,
+        300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "e9ccd80a-0456-4556-af92-1ecc8bd12f3e",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        300,
+        300
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "source_mode",
+              "value": "mcp",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "delivery_mode",
+              "value": "stdout",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "slack_webhook_url",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "a4",
+              "name": "window_hours",
+              "value": 720,
+              "type": "number"
+            },
+            {
+              "id": "a5",
+              "name": "stale_days",
+              "value": 3,
+              "type": "number"
+            },
+            {
+              "id": "a7",
+              "name": "meegle_mcp_token",
+              "value": "m-AB-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+              "type": "string"
+            },
+            {
+              "id": "a8",
+              "name": "meegle_project_key",
+              "value": "693a4c95897fcda33ebe0175",
+              "type": "string"
+            },
+            {
+              "id": "a9",
+              "name": "meegle_simple_name",
+              "value": "c4u20i",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "8efc5fc6-e6c8-455c-a083-fe08a10eacf0",
+      "name": "Daily 09:00 Weekdays",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        100,
+        450
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1-5"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "91f1d13f-1137-4be9-99cb-12b4ef528e71",
+      "name": "MCP: fetch bugs (issue)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://meegle.com/mcp_server/v1",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Mcp-Token",
+              "value": "={{ $json.meegle_mcp_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"search_by_mql\", arguments: { project_key: $json.meegle_project_key, mql: \"SELECT `work_item_id`, `name`, `priority`, `work_item_status`, `current_status_operator`, `updated_at` FROM `\" + $json.meegle_simple_name + \"`.`issue` WHERE RELATIVE_DATETIME_BETWEEN(`updated_at`, 'past', '\" + Math.max(1, Math.ceil($json.window_hours/24)) + \"d')\" } } }) }}"
+      }
+    },
+    {
+      "id": "87c808a8-bf35-4c10-a58a-4e82d9c8c179",
+      "name": "MCP: fetch stories",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://meegle.com/mcp_server/v1",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Mcp-Token",
+              "value": "={{ $('Config').first().json.meegle_mcp_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 2, method: \"tools/call\", params: { name: \"search_by_mql\", arguments: { project_key: $(\"Config\").first().json.meegle_project_key, mql: \"SELECT `work_item_id`, `name`, `priority`, `work_item_status`, `current_status_operator`, `updated_at` FROM `\" + $(\"Config\").first().json.meegle_simple_name + \"`.`story` WHERE RELATIVE_DATETIME_BETWEEN(`updated_at`, 'past', '\" + Math.max(1, Math.ceil($(\"Config\").first().json.window_hours/24)) + \"d')\" } } }) }}"
+      }
+    },
+    {
+      "id": "153e83ea-8a3b-4beb-b906-cb19f974da99",
+      "name": "Normalize MCP results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Pull items from BOTH upstream HTTP nodes (bugs node ran first, stories second).\n// In a chain, items[] only carries the immediately-previous node's output,\n// so we explicitly fetch the bugs node's output via its name.\nfunction extract(rawList, type) {\n  const out = [];\n  for (const raw of rawList) {\n    const o = {};\n    for (const f of raw.moql_field_list || []) {\n      const k = f.key, v = f.value || {};\n      if (v.string_value !== undefined) o[k] = v.string_value;\n      else if (v.long_value !== undefined) o[k] = String(v.long_value);\n      else if (v.key_label_value) o[k] = v.key_label_value.label;\n      else if (v.key_label_value_list) o[k] = v.key_label_value_list.map(x => x.label).join(',');\n      else if (v.user_value_list) o[k] = v.user_value_list.map(u => u.name_cn || u.name_en).join(',');\n      else o[k] = '';\n    }\n    out.push({\n      key: 'POND-' + o.work_item_id,\n      type,\n      title: o.name || '(无标题)',\n      priority: o.priority || 'P2',\n      status: o.work_item_status || '进行中',\n      assignee: o.current_status_operator || '未分配',\n      created_at: o.updated_at,\n      updated_at: o.updated_at,\n      blocked: (o.work_item_status || '').includes('阻塞'),\n    });\n  }\n  return out;\n}\n\nfunction parseMcp(items) {\n  const rows = [];\n  for (const item of items) {\n    const texts = (item.json?.result?.content || []).map(c => c.text).filter(t => !t.startsWith('logid'));\n    const parsed = texts.map(t => { try { return JSON.parse(t); } catch { return null; } }).filter(Boolean);\n    const result = parsed[0] || {};\n    const data = result.data || {};\n    const groupId = Object.keys(data)[0];\n    rows.push(...(data[groupId] || []));\n  }\n  return rows;\n}\n\nconst bugsRaw = parseMcp($('MCP: fetch bugs (issue)').all());\nconst storiesRaw = parseMcp($('MCP: fetch stories').all());\nconst all = [...extract(bugsRaw, 'bug'), ...extract(storiesRaw, 'story')];\n// Always return at least one item so downstream nodes run even when the window is empty.\nif (all.length === 0) {\n  return [{ json: { _empty: true, key: 'EMPTY', type: 'bug', title: '', priority: 'P3', status: '已关闭', assignee: '', created_at: '', updated_at: '', blocked: false } }];\n}\nreturn all.map(r => ({ json: r }));"
+      }
+    },
+    {
+      "id": "f8f66951-ad12-4100-81b2-4196a2985ed2",
+      "name": "Aggregate (in code)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const cfgNode = $('Config').first().json;\nconst windowHours = cfgNode.window_hours || 24;\nconst staleDays = cfgNode.stale_days || 3;\nconst now = Date.now();\nconst windowStart = now - windowHours * 3600 * 1000;\nconst staleBefore = now - staleDays * 86400 * 1000;\nconst rawItems = $input.all().map(i => i.json).filter(r => !r._empty);\nconst items = rawItems;\nconst inWindow = r => new Date(r.updated_at).getTime() >= windowStart;\nconst bugs = items.filter(r => r.type === 'bug' && inWindow(r));\nconst stories = items.filter(r => r.type === 'story' && inWindow(r));\nconst prioOrder = ['P0','P1','P2','P3'];\nconst prioCount = {};\nfor (const p of prioOrder) prioCount[p] = { new: 0, closed: 0 };\nfor (const b of bugs) {\n  const p = prioCount[b.priority] ? b.priority : 'P2';\n  if (b.status === '已关闭') prioCount[p].closed++; else prioCount[p].new++;\n}\nconst highPriority = items\n  .filter(r => r.type === 'bug' && ['P0','P1'].includes(r.priority) && r.status !== '已关闭')\n  .sort((a,b) => prioOrder.indexOf(a.priority) - prioOrder.indexOf(b.priority));\nconst storyProgress = stories.filter(s => s.status !== '已完成');\nconst storyDone = stories.filter(s => s.status === '已完成');\nconst blocked = items.filter(r => r.blocked || r.status === '阻塞');\nconst staleHighPrio = items.filter(r =>\n  r.type === 'bug' && ['P0','P1'].includes(r.priority) && r.status !== '已关闭' &&\n  new Date(r.updated_at).getTime() < staleBefore\n);\nconst aggregate = {\n  date: new Date(now).toLocaleDateString('zh-CN', {timeZone:'Asia/Shanghai'}),\n  bugs_total: bugs.length,\n  bugs_new: bugs.filter(b=>b.status!=='已关闭').length,\n  bugs_closed: bugs.filter(b=>b.status==='已关闭').length,\n  prio: prioCount,\n  stories_active: storyProgress.length,\n  stories_done: storyDone.length,\n};\nreturn [{ json: { aggregate, highPriority, storyProgress, storyDone, blocked, staleHighPrio, cfg: cfgNode } }];"
+      }
+    },
+    {
+      "id": "516402f7-4347-46e4-a39b-2e4adb08f19d",
+      "name": "Compose digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst a = d.aggregate;\nconst c = d.cfg;\nconst prio = a.prio;\nconst lines = [];\nlines.push('*📊 研发日报 · ' + a.date + '（团队）*');\nlines.push('');\nlines.push('🔢 *概览*：bug ' + a.bugs_total + '（新增 ' + a.bugs_new + '，关闭 ' + a.bugs_closed + '）；需求推进 ' + (a.stories_active + a.stories_done) + ' 项');\nlines.push('　按优先级：P0 新' + prio.P0.new + '/关' + prio.P0.closed + ' · P1 新' + prio.P1.new + '/关' + prio.P1.closed + ' · P2 新' + prio.P2.new + '/关' + prio.P2.closed + ' · P3 新' + prio.P3.new + '/关' + prio.P3.closed);\nlines.push('');\nif (d.highPriority.length) {\n  lines.push('🔴 *高优 bug*（' + d.highPriority.length + '）');\n  for (const b of d.highPriority.slice(0, 5)) {\n    lines.push('　• \\x60' + b.key + '\\x60 [' + b.priority + '] ' + b.title + ' — @' + b.assignee + '（' + b.status + '）');\n  }\n  if (d.highPriority.length > 5) lines.push('　… 及另外 ' + (d.highPriority.length - 5) + ' 个');\n  lines.push('');\n}\nif (d.storyProgress.length || d.storyDone.length) {\n  lines.push('📈 *需求进展*');\n  for (const s of d.storyDone.slice(0, 3)) lines.push('　✅ \\x60' + s.key + '\\x60 ' + s.title + ' — @' + s.assignee);\n  for (const s of d.storyProgress.slice(0, 5)) lines.push('　🚧 \\x60' + s.key + '\\x60 ' + s.title + ' — @' + s.assignee + '（' + s.status + '）');\n  lines.push('');\n}\nif (d.blocked.length) {\n  lines.push('⛔ *阻塞项*（' + d.blocked.length + '）');\n  for (const b of d.blocked.slice(0, 5)) lines.push('　• \\x60' + b.key + '\\x60 ' + b.title + ' — @' + b.assignee);\n  lines.push('');\n}\nif (d.staleHighPrio.length) {\n  lines.push('⏰ *挂起提醒*（> ' + c.stale_days + ' 天未更新的高优 bug，' + d.staleHighPrio.length + ' 个）');\n  for (const b of d.staleHighPrio.slice(0, 3)) lines.push('　• \\x60' + b.key + '\\x60 ' + b.title + ' — @' + b.assignee);\n}\nreturn [{ json: { text: lines.join('\\n'), delivery_mode: c.delivery_mode, slack_webhook_url: c.slack_webhook_url } }];"
+      }
+    },
+    {
+      "id": "25989f76-79fe-47e6-901f-9103679c4461",
+      "name": "POST to Slack webhook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1500,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.slack_webhook_url }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.text }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "6df1887e-9d38-40ca-9ccd-1411446490ed",
+      "name": "Done (log only)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        450
+      ],
+      "parameters": {
+        "jsCode": "return items;"
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger (demo)": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "MCP: fetch bugs (issue)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily 09:00 Weekdays": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP: fetch bugs (issue)": {
+      "main": [
+        [
+          {
+            "node": "MCP: fetch stories",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP: fetch stories": {
+      "main": [
+        [
+          {
+            "node": "Normalize MCP results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize MCP results": {
+      "main": [
+        [
+          {
+            "node": "Aggregate (in code)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate (in code)": {
+      "main": [
+        [
+          {
+            "node": "Compose digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose digest": {
+      "main": [
+        [
+          {
+            "node": "POST to Slack webhook",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Done (log only)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {},
+  "nodeGroups": [
+    {
+      "id": "c11429db-c676-4fa0-a3d7-4b34bcd69ce8",
+      "name": "Data Source (Meegle MCP)",
+      "nodeIds": [
+        "91f1d13f-1137-4be9-99cb-12b4ef528e71",
+        "87c808a8-bf35-4c10-a58a-4e82d9c8c179",
+        "153e83ea-8a3b-4beb-b906-cb19f974da99"
+      ],
+      "description": "Fetch bugs & stories from Meegle via MCP server, normalize to work_item"
+    },
+    {
+      "id": "fe759026-e8c4-4b44-87fe-f0e5008551a1",
+      "name": "Report Engine",
+      "nodeIds": [
+        "f8f66951-ad12-4100-81b2-4196a2985ed2",
+        "516402f7-4347-46e4-a39b-2e4adb08f19d"
+      ],
+      "description": "Aggregate stats in code, compose structured Chinese digest"
+    }
+  ]
+}

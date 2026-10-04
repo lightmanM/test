@@ -3,15 +3,15 @@
 Living document. Update at the end of every work session and every PR.
 
 ## Current status
-- **Phase**: planning complete; **P0 not started**.
-- **Next step**: wait for owner's go-ahead, then start P0 (Foundations).
+- **Phase**: P0 Foundations — in review.
+- **Next step**: merge the P0 PR, then start P1a (backend core).
 - **Blocked on owner**: nothing until P7 (credentials). See plan §15.
 
 ## Phases and PRs
 
 | Phase | PR | Status | Notes |
 |---|---|---|---|
-| P0 Foundations | — | not started | repo layout, tooling, catalog + fixed templates, SDK compile, setup guide |
+| P0 Foundations | (pending) | in review | repo layout, tooling, CI, catalog + fixed templates, SDK compile, setup guide |
 | P1a Backend core | — | not started | auth, DB, catalog API, state machine, fake adapters |
 | P1b Frontend | — | not started | sign-in, catalog, workflow page, admin shell |
 | P2 Connections | — | not started | Nango connect + manual secrets |
@@ -24,11 +24,15 @@ Living document. Update at the end of every work session and every PR.
 ## Phase checklists
 
 ### P0 Foundations
-- [ ] Repo layout (`app/`, `catalog/`, `services/`, `deploy/`, `scripts/`) and tooling (ruff, pytest, Vite, TypeScript)
-- [ ] `catalog/*/catalog.yaml` for all 5 workflows (connectors, settings schema, how to try, result source)
-- [ ] `scripts/compile_n8n_sdk.mjs` → `catalog/meegle-daily-digest/workflow.json`
-- [ ] Fixed templates: uptime (status update, no Gmail node, 30 min, Slack token auth), meegle digest (token via credential, IF before Slack), medium digest (5 articles, reader auth, timeouts)
-- [ ] `docs/setup-guide.md`: Slack app manifests (connect + bot), Google Internal OAuth client steps, Nango integrations, Make Bridge template steps, Modal, Neon
+Notes: backend package `app/backend/workflow_demo` (catalog models/loader, template fixes, n8n JSON helpers);
+`scripts/build_catalog.py [--check]` regenerates `catalog/*/workflow.json` + `blueprint.json` from
+`demo-project/`; CI (`.github/workflows/ci.yml`) runs ruff, pytest and the template check. Frontend
+tooling moves to P1b; `services/` and `deploy/` folders are created in P4/P7.
+- [x] Repo layout (`app/`, `catalog/`, `services/`, `deploy/`, `scripts/`) and tooling (ruff, pytest, Vite, TypeScript)
+- [x] `catalog/*/catalog.yaml` for all 5 workflows (connectors, settings schema, how to try, result source)
+- [x] `scripts/compile_n8n_sdk.mjs` → `catalog/meegle-daily-digest/workflow.json`
+- [x] Fixed templates: uptime (status update, no Gmail node, 30 min, Slack token auth), meegle digest (token via credential, IF before Slack), medium digest (5 articles, reader auth, timeouts)
+- [x] `docs/setup-guide.md`: Slack app manifests (connect + bot), Google Internal OAuth client steps, Nango integrations, Make Bridge template steps, Modal, Neon
 
 ### P1a Backend core
 - [ ] FastAPI app, settings, Postgres models + Alembic migration
@@ -89,4 +93,5 @@ Living document. Update at the end of every work session and every PR.
 | 2026-10-04 | Leaked Meegle token removed from git history (2 commits rewritten; `main` now at e7c40dc). Owner to revoke the token in Meegle. |
 
 ## Session log
+- 2026-10-04: P0 implemented (catalog, template fixes, compile script, setup guide, CI); 20 tests passing.
 - 2026-10-03/04: feasibility research (n8n, Make, Zapier, Dify, Nango, Modal), evaluated all 5 workflows, cleaned leaked token from history, wrote `docs/implementation-plan.md`, added this tracker, `CLAUDE.md` and `docs/research-notes.md`.

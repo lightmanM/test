@@ -1,0 +1,39 @@
+id: uptime-monitor
+name: Website uptime monitor
+summary: Checks your websites every 30 minutes and alerts Slack when one goes down or recovers.
+description: |
+  Reads a list of websites from a Google Sheet, requests each one, logs the result and posts a
+  Slack alert when a site goes down, stays down, or comes back up. Deploying creates the
+  monitoring spreadsheet ("Uptime monitor (demo)") in your Google Drive.
+platform: n8n
+source: demo-project/Host your own uptime monitoring with scheduled triggers.json
+connectors:
+  - id: google
+    purpose: Creates the monitoring spreadsheet in your Drive and keeps it updated.
+  - id: slack
+    purpose: Posts alerts to the channel you choose.
+settings:
+  - key: slack_channel
+    label: Slack channel for alerts
+    type: slack_channel
+  - key: sites
+    label: Websites to monitor
+    type: url_list
+    default:
+      - https://example.com
+      - https://httpbin.org/status/503
+    help: The second default URL always fails, so you'll see an alert.
+try_it: |
+  Click **Run now**. Within a minute you get a Slack alert for the failing site and new rows in
+  the spreadsheet's Log tab. Edit the Sites tab to change what's monitored. The monitor also runs
+  every 30 minutes until the deployment expires.
+n8n:
+  template: workflow.json
+  values:
+    spreadsheet_id: deploy
+    slack_channel: setting
+  credentials:
+    google: {type: googleSheetsOAuth2Api, source: connection, ref: google}
+    slack: {type: slackApi, source: connection, ref: slack}
+  result_nodes:
+    - Calculate Status

@@ -1,0 +1,540 @@
+{
+  "name": "GitHub merge → Slack (demo template)",
+  "flow": [
+    {
+      "id": 1,
+      "module": "github:newPullRequest",
+      "version": 4,
+      "parameters": {
+        "__IMTCONN__": null,
+        "choose": "updated",
+        "owner": "heroliy-sketch",
+        "name": "auto-workflow",
+        "limit": 2
+      },
+      "mapper": {},
+      "metadata": {
+        "designer": {
+          "x": 0,
+          "y": 0,
+          "name": "Watch Merged PR"
+        },
+        "restore": {
+          "parameters": {
+            "__IMTCONN__": {
+              "label": "devin GitHub connection"
+            },
+            "choose": {
+              "mode": "chose",
+              "label": "Updated Date"
+            },
+            "owner": {
+              "mode": "chose",
+              "label": "heroliy-sketch"
+            },
+            "name": {
+              "mode": "chose",
+              "label": "auto-workflow"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "on": {
+              "change": "reset_epoch"
+            },
+            "name": "__IMTCONN__",
+            "type": "account:github2,github",
+            "label": "Connection",
+            "required": true
+          },
+          {
+            "name": "choose",
+            "type": "select",
+            "label": "Watch",
+            "required": true,
+            "validate": {
+              "enum": [
+                "created",
+                "updated"
+              ]
+            }
+          },
+          {
+            "name": "owner",
+            "type": "select",
+            "label": "Owner",
+            "mappable": true,
+            "required": true
+          },
+          {
+            "mode": "edit",
+            "name": "name",
+            "type": "select",
+            "label": "Repository Name",
+            "mappable": true,
+            "required": true
+          },
+          {
+            "name": "limit",
+            "type": "uinteger",
+            "label": "Limit",
+            "default": 2,
+            "required": true
+          },
+          {
+            "name": "pageLimit",
+            "type": "uinteger",
+            "label": "Page size",
+            "default": 100,
+            "advanced": true,
+            "validate": {
+              "max": 100,
+              "min": 10
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "module": "github:makeRestApiCall",
+      "version": 4,
+      "parameters": {
+        "__IMTCONN__": null
+      },
+      "mapper": {
+        "url": "/repos/heroliy-sketch/auto-workflow/commits/{{1.mergeCommit.abbreviatedOid}}",
+        "method": "GET"
+      },
+      "metadata": {
+        "designer": {
+          "x": 300,
+          "y": 0,
+          "name": "Get Commit Diff"
+        },
+        "restore": {
+          "parameters": {
+            "__IMTCONN__": {
+              "label": "devin GitHub connection"
+            }
+          },
+          "expect": {
+            "method": {
+              "mode": "chose",
+              "label": "GET"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "__IMTCONN__",
+            "type": "account:github2,github",
+            "label": "Connection",
+            "required": true
+          }
+        ],
+        "expect": [
+          {
+            "name": "url",
+            "type": "text",
+            "label": "URL",
+            "required": true
+          },
+          {
+            "name": "method",
+            "type": "select",
+            "label": "Method",
+            "default": "GET",
+            "required": true,
+            "validate": {
+              "enum": [
+                "GET",
+                "POST",
+                "PUT",
+                "PATCH",
+                "DELETE"
+              ]
+            }
+          },
+          {
+            "name": "headers",
+            "spec": {
+              "spec": [
+                {
+                  "name": "key",
+                  "type": "text",
+                  "label": "Key"
+                },
+                {
+                  "name": "value",
+                  "type": "text",
+                  "label": "Value"
+                }
+              ],
+              "type": "collection",
+              "label": "Header"
+            },
+            "type": "array",
+            "label": "Headers",
+            "labels": {
+              "add": "Add header"
+            },
+            "default": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          {
+            "name": "qs",
+            "spec": {
+              "spec": [
+                {
+                  "name": "key",
+                  "type": "text",
+                  "label": "Key"
+                },
+                {
+                  "name": "value",
+                  "type": "text",
+                  "label": "Value"
+                }
+              ],
+              "type": "collection",
+              "label": "Parameter"
+            },
+            "type": "array",
+            "label": "Query String",
+            "labels": {
+              "add": "Add parameter"
+            }
+          },
+          {
+            "name": "body",
+            "type": "any",
+            "label": "Body"
+          }
+        ]
+      },
+      "filter": {
+        "name": "Merged pull requests only",
+        "conditions": [
+          [
+            {
+              "a": "{{1.merged}}",
+              "b": "true",
+              "o": "boolean:equal"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "module": "slack:CreateMessage",
+      "version": 4,
+      "parameters": {
+        "__IMTCONN__": null
+      },
+      "mapper": {
+        "channelWType": "list",
+        "channelType": "public",
+        "channel": "C0C5E88SKSP",
+        "text": "*GitHub 合并提交通知*\n\n*仓库：* heroliy-sketch/auto-workflow\n*PR：* {{1.title}}\n*合并人：* {{1.mergedBy.login}}\n*提交：* {{1.mergeCommit.abbreviatedOid}}\n*链接：* {{1.url}}\n\n*本次提交 Diff：*\n```{{2.body}}```"
+      },
+      "metadata": {
+        "designer": {
+          "x": 600,
+          "y": 0,
+          "name": "Notify Frontend"
+        },
+        "restore": {
+          "parameters": {
+            "__IMTCONN__": {
+              "label": "devin Slack (bot) connection"
+            }
+          },
+          "expect": {
+            "channelWType": {
+              "mode": "chose",
+              "label": "Select from the list",
+              "nested": [
+                {
+                  "name": "channelType",
+                  "type": "select",
+                  "label": "Channel type",
+                  "options": [
+                    {
+                      "label": "Public channel",
+                      "value": "public",
+                      "nested": [
+                        {
+                          "name": "channel",
+                          "type": "select",
+                          "label": "Public channel",
+                          "options": "rpc://slack@4/PublicChannels",
+                          "required": true
+                        }
+                      ],
+                      "default": true
+                    },
+                    {
+                      "label": "Private channel",
+                      "value": "private",
+                      "nested": [
+                        {
+                          "name": "channel",
+                          "type": "select",
+                          "label": "Private channel",
+                          "options": "rpc://slack@4/PrivateChannels",
+                          "required": true
+                        }
+                      ]
+                    },
+                    {
+                      "label": "Direct message",
+                      "value": "im",
+                      "nested": [
+                        {
+                          "name": "idType",
+                          "type": "select",
+                          "label": "ID type",
+                          "default": "channel",
+                          "options": {
+                            "store": [
+                              {
+                                "label": "Channel ID",
+                                "value": "channel",
+                                "nested": [
+                                  {
+                                    "name": "channel",
+                                    "type": "select",
+                                    "label": "User (Channel ID)",
+                                    "options": "rpc://slack@4/IMChannels",
+                                    "required": true
+                                  }
+                                ]
+                              },
+                              {
+                                "label": "User ID",
+                                "value": "user",
+                                "nested": [
+                                  {
+                                    "name": "channel",
+                                    "type": "text",
+                                    "label": "User (User ID)",
+                                    "required": true
+                                  }
+                                ]
+                              },
+                              {
+                                "label": "Username",
+                                "value": "username",
+                                "nested": [
+                                  {
+                                    "name": "channel",
+                                    "type": "text",
+                                    "label": "User (Username)",
+                                    "required": true
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          "required": true
+                        }
+                      ]
+                    },
+                    {
+                      "label": "Direct message to multiple people",
+                      "value": "mpim",
+                      "nested": [
+                        {
+                          "name": "channel",
+                          "type": "select",
+                          "label": "Direct message to multiple people",
+                          "options": "rpc://slack@4/MPIMChannels",
+                          "required": true
+                        }
+                      ]
+                    }
+                  ],
+                  "mappable": false,
+                  "required": true
+                }
+              ]
+            },
+            "channelType": {
+              "mode": "chose",
+              "label": "Public channel",
+              "nested": [
+                {
+                  "name": "channel",
+                  "type": "select",
+                  "label": "Public channel",
+                  "options": "rpc://slack@4/PublicChannels",
+                  "required": true
+                }
+              ]
+            },
+            "channel": {
+              "mode": "chose",
+              "label": "ai_workflows_test1"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "__IMTCONN__",
+            "type": "account:slack2,slack3",
+            "label": "Connection",
+            "required": true
+          }
+        ],
+        "expect": [
+          {
+            "name": "channelWType",
+            "type": "select",
+            "label": "Enter a channel ID or name",
+            "mappable": false,
+            "required": true,
+            "validate": {
+              "enum": [
+                "manualy",
+                "list"
+              ]
+            }
+          },
+          {
+            "name": "channelType",
+            "type": "select",
+            "label": "Channel type",
+            "mappable": false,
+            "required": true,
+            "validate": {
+              "enum": [
+                "public",
+                "private",
+                "im",
+                "mpim"
+              ]
+            }
+          },
+          {
+            "name": "channel",
+            "type": "select",
+            "label": "Public channel",
+            "required": true
+          },
+          {
+            "name": "text",
+            "type": "text",
+            "label": "Text",
+            "required": false
+          },
+          {
+            "name": "blocks",
+            "type": "text",
+            "label": "Blocks",
+            "required": false
+          },
+          {
+            "name": "thread_ts",
+            "type": "text",
+            "label": "Thread message ID (time stamp)",
+            "advanced": true,
+            "required": false
+          },
+          {
+            "name": "reply_broadcast",
+            "type": "boolean",
+            "label": "Reply broadcast",
+            "advanced": true,
+            "required": false
+          },
+          {
+            "name": "link_names",
+            "type": "boolean",
+            "label": "Link names",
+            "advanced": true,
+            "required": false
+          },
+          {
+            "name": "parse",
+            "type": "boolean",
+            "label": "Parse message text",
+            "default": false,
+            "advanced": true,
+            "required": false
+          },
+          {
+            "name": "mrkdwn",
+            "type": "boolean",
+            "label": "Use markdown",
+            "default": true,
+            "advanced": true,
+            "required": false
+          },
+          {
+            "name": "unfurl_links",
+            "type": "boolean",
+            "label": "Unfurl primarily text-based content",
+            "advanced": true,
+            "required": false
+          },
+          {
+            "name": "unfurl_media",
+            "type": "boolean",
+            "label": "Unfurl media content",
+            "advanced": true,
+            "required": false
+          },
+          {
+            "name": "icon_emoji",
+            "type": "text",
+            "label": "Icon emoji",
+            "advanced": true,
+            "required": false
+          },
+          {
+            "name": "icon_url",
+            "type": "url",
+            "label": "Icon url",
+            "advanced": true,
+            "required": false
+          },
+          {
+            "name": "username",
+            "type": "text",
+            "label": "User name",
+            "advanced": true,
+            "required": false
+          }
+        ]
+      }
+    }
+  ],
+  "metadata": {
+    "instant": false,
+    "version": 1,
+    "scenario": {
+      "roundtrips": 1,
+      "maxErrors": 3,
+      "autoCommit": true,
+      "autoCommitTriggerLast": true,
+      "sequential": false,
+      "slots": null,
+      "confidential": false,
+      "dataloss": false,
+      "dlq": false,
+      "freshVariables": false
+    },
+    "designer": {
+      "orphans": []
+    },
+    "zone": "us2.make.com",
+    "notes": []
+  }
+}
