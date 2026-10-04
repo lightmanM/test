@@ -94,7 +94,8 @@
           "id": "slot:google",
           "name": "google"
         }
-      }
+      },
+      "alwaysOutputData": true
     },
     {
       "parameters": {

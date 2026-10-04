@@ -123,6 +123,13 @@ def test_medium_digest_fix(originals):
     assert_no_secrets(wf)
 
 
+def test_medium_digest_reports_an_empty_inbox(originals):
+    # Without "Always output data" n8n ends the run when Gmail finds nothing, so the
+    # "Build empty report" branch (reached through Extract article links → noArticles) never runs.
+    wf = fixes.fix_medium_digest(originals["medium-digest"])
+    assert wj.node(wf, "Find Medium Daily Digest emails").get("alwaysOutputData") is True
+
+
 def test_github_blueprint_fix(originals):
     bp = fixes.fix_github_merge_blueprint(originals["github-merge-slack"])
     flow = {m["id"]: m for m in bp["flow"]}

@@ -12,7 +12,7 @@ import respx
 from workflow_demo.adapters.base import AdapterError, DeployContext, OAuthTokens
 from workflow_demo.adapters.n8n import N8nAdapter, summarize_execution
 from workflow_demo.catalog.loader import load_catalog
-from workflow_demo.n8n.client import N8nClient
+from workflow_demo.n8n.client import N8nClient, N8nError
 from workflow_demo.n8n.transform import RUN_HEADER, RUN_NODE_NAME
 
 N8N = "https://n8n.test"
@@ -456,3 +456,49 @@ def test_summaries_for_text_reports():
     summary = summarize_execution(digest, ["Compose digest"]).summary
     assert summary.startswith("📊 日报") and len(summary) == 4000
     assert summarize_execution({"id": "7", "status": "canceled"}, []).error == "Canceled"
+
+
+@respx.mock
+def test_delete_unpublishes_a_published_workflow_first():
+    # n8n 2.x refuses to delete a published workflow (409) — redeploy, delete and expiry all hit this.
+    client = N8nClient(N8N, "key", httpx.Client())
+    refused = httpx.Response(409, json={"message": "Cannot delete a published workflow."})
+    deleted = respx.delete(f"{API}/workflows/wf-1").mock(side_effect=[refused, httpx.Response(200, json={})])
+    unpublished = respx.post(f"{API}/workflows/wf-1/unpublish").mock(return_value=httpx.Response(200))
+    client.delete_workflow("wf-1")
+    assert unpublished.called and deleted.call_count == 2
+
+
+@respx.mock
+def test_unpublish_falls_back_to_deactivate():
+    client = N8nClient(N8N, "key", httpx.Client())
+    refused = httpx.Response(409, json={"message": "published"})
+    respx.delete(f"{API}/workflows/wf-1").mock(side_effect=[refused, httpx.Response(200, json={})])
+    missing = httpx.Response(404, json={"message": "nope"})
+    respx.post(f"{API}/workflows/wf-1/unpublish").mock(return_value=missing)
+    deactivated = respx.post(f"{API}/workflows/wf-1/deactivate").mock(return_value=httpx.Response(200))
+    client.delete_workflow("wf-1")
+    assert deactivated.called
+
+
+@respx.mock
+def test_delete_waits_while_n8n_finishes_unpublishing():
+    # n8n unpublishes in the background: the next delete may still answer 409 for a few seconds.
+    waits = []
+    client = N8nClient(N8N, "key", httpx.Client(), sleep=waits.append)
+    busy = httpx.Response(409, json={"message": "Workflow is still being unpublished."})
+    responses = [httpx.Response(409, json={"message": "published"}), busy, busy, httpx.Response(200, json={})]
+    deleted = respx.delete(f"{API}/workflows/wf-1").mock(side_effect=responses)
+    respx.post(f"{API}/workflows/wf-1/unpublish").mock(return_value=httpx.Response(200))
+    client.delete_workflow("wf-1")
+    assert deleted.call_count == 4 and waits == [0.5, 1]  # refused, unpublish, busy, busy, done
+
+
+@respx.mock
+def test_delete_gives_up_when_the_workflow_stays_published():
+    client = N8nClient(N8N, "key", httpx.Client(), sleep=lambda _: None)
+    refused = httpx.Response(409, json={"message": "published"})
+    respx.delete(f"{API}/workflows/wf-1").mock(return_value=refused)
+    respx.post(f"{API}/workflows/wf-1/unpublish").mock(return_value=httpx.Response(200))
+    with pytest.raises(N8nError, match="409"):
+        client.delete_workflow("wf-1")
