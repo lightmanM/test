@@ -50,8 +50,8 @@ jobs:
           python scripts/build_catalog.py --check-compiled /tmp/compiled.json
 
   services:
-    # Modal apps for the shared reader and Slack bot. The bot's demo patch must still apply to the
-    # team's code, and the patched modules are tested without installing the bot's dependencies.
+    # Modal apps (shared reader, Slack bot, the demo itself). The bot's demo patch must still apply
+    # to the team's code, and the patched modules are tested without installing the bot's dependencies.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -64,9 +64,10 @@ jobs:
       - run: services/slack-meegle-bot/check.sh
       - run: |
           pip install ruff
-          ruff check --config app/backend/pyproject.toml services
-          ruff format --config app/backend/pyproject.toml --check services
-          python -m py_compile services/medium-reader/modal_app.py services/slack-meegle-bot/modal_app.py
+          ruff check --config app/backend/pyproject.toml services deploy
+          ruff format --config app/backend/pyproject.toml --check services deploy
+          python -m py_compile services/medium-reader/modal_app.py services/slack-meegle-bot/modal_app.py \
+            deploy/modal_app.py
 
   frontend:
     runs-on: ubuntu-latest

@@ -137,8 +137,8 @@ Produces: `DATABASE_URL`.
 
 ## 9. AI key and Meegle
 
-- **OpenAI-compatible key** for the Medium digest: `OPENAI_API_KEY` (optional `OPENAI_BASE_URL`,
-  `LLM_MODEL`, default `gpt-4o-mini`).
+- **OpenAI-compatible key** for the Medium digest: `OPENAI_API_KEY` (optional `OPENAI_BASE_URL`;
+  testers pick the model, default `gpt-4o-mini`).
 - **Meegle, shared bot** (see `demo-project/slark-meegle-bot/README.md` for where each comes from):
   `MEEGLE_PLUGIN_ID`, `MEEGLE_PLUGIN_SECRET`, `MEEGLE_PROJECT_KEY`, `MEEGLE_SIMPLE_NAME`,
   `MEEGLE_WORK_ITEM_TYPE_KEY`, `MEEGLE_USER_KEY` (service account), optional `MEEGLE_ROLE_KEY`.
@@ -146,8 +146,8 @@ Produces: `DATABASE_URL`.
 
 ## 10. Demo configuration
 
-All values above, plus these generated ones, go into a Modal secret named `workflow-demo`
-(full list in `docs/implementation-plan.md` §11):
+All values above, plus these generated ones, go into a Modal secret named `workflow-demo-app`
+(template: `deploy/production.env.example`; step-by-step: `docs/go-live.md`):
 
 | Setting | Value |
 |---|---|
