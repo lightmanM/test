@@ -3,8 +3,8 @@
 Living document. Update at the end of every work session and every PR.
 
 ## Current status
-- **Phase**: P1a Backend core — in review.
-- **Next step**: merge the P1a PR, then start P1b (frontend).
+- **Phase**: P1b Frontend — in review.
+- **Next step**: merge the P1b PR, then start P2 (connections: Nango + manual secrets).
 - **Blocked on owner**: nothing until P7 (credentials). See plan §15.
 
 ## Phases and PRs
@@ -12,8 +12,8 @@ Living document. Update at the end of every work session and every PR.
 | Phase | PR | Status | Notes |
 |---|---|---|---|
 | P0 Foundations | [#1](https://github.com/lightmanM/test/pull/1) | merged | repo layout, tooling, CI, catalog + fixed templates, SDK compile, setup guide |
-| P1a Backend core | [#2](https://github.com/lightmanM/test/pull/2) | in review | auth, DB, catalog API, state machine, fake adapters |
-| P1b Frontend | — | not started | sign-in, catalog, workflow page, admin shell |
+| P1a Backend core | [#2](https://github.com/lightmanM/test/pull/2) | merged | auth, DB, catalog API, state machine, fake adapters |
+| P1b Frontend | [#3](https://github.com/lightmanM/test/pull/3) | in review | sign-in, catalog, workflow page, admin shell |
 | P2 Connections | — | not started | Nango connect + manual secrets |
 | P3 n8n | — | not started | adapter, 3 transforms, shared credentials, Run now, results |
 | P4 Modal services | — | not started | reader + bot on Modal, bot patches, "Activate for me" |
@@ -55,8 +55,16 @@ handled; session cookie also checks the username.
 - [x] Unit tests
 
 ### P1b Frontend
-- [ ] Sign-in, catalog, workflow page (connect / settings / deploy / try), admin shell
-- [ ] Playwright click-through in fake mode
+Notes: `app/frontend` (React 18 + Vite 5 + TS + Tailwind 4 + TanStack Query + React Router). The backend serves the
+build (`app/frontend/dist`, SPA fallback; override with `WORKFLOW_DEMO_FRONTEND_DIST`). Make popup: opened blank on
+click, navigated when the job returns `popup_url`, closes itself and `postMessage`s back. Connect buttons use the
+fake-mode endpoint until P2. Playwright E2E (`npm run e2e`) starts the backend in fake mode on port 8765; locally
+set `PW_CHROMIUM_PATH=/opt/pw-browsers/chromium` and `PYTHON=.venv/bin/python`.
+Review fixes: popup closed if the deploy ends without reaching Make; select inputs keep option types and show
+"Choose…" for invalid values; non-401 errors show a retry; connect errors clear; safe sign-out; delete guarded;
+catch-all route answers unknown non-GET/API paths with 404; `safe_static_file` tested; shared `isTransitional`.
+- [x] Sign-in, catalog, workflow page (connect / settings / deploy / try), admin shell
+- [x] Playwright click-through in fake mode
 
 ### P2 Connections
 - [ ] Nango connect session + verify tags + store connection; Slack channel picker
@@ -107,6 +115,7 @@ handled; session cookie also checks the username.
 | 2026-10-04 | Leaked Meegle token removed from git history (2 commits rewritten; `main` now at e7c40dc). Owner to revoke the token in Meegle. |
 
 ## Session log
+- 2026-10-04: PR #2 (P1a) merged. P1b implemented: 4 E2E + 3 unit (frontend), 70 backend tests.
 - 2026-10-04: PR #1 (P0) reviewed, fixed, CI green, merged. P1a implemented, reviewed (10 findings fixed): 69 tests passing.
 - 2026-10-04: P0 implemented (catalog, template fixes, compile script, setup guide, CI); 20 tests passing.
 - 2026-10-03/04: feasibility research (n8n, Make, Zapier, Dify, Nango, Modal), evaluated all 5 workflows, cleaned leaked token from history, wrote `docs/implementation-plan.md`, added this tracker, `CLAUDE.md` and `docs/research-notes.md`.
