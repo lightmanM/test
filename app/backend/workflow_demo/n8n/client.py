@@ -55,9 +55,6 @@ class N8nClient:
     def delete_credential(self, credential_id: str) -> None:
         self._delete(f"/credentials/{quote(credential_id, safe='')}")
 
-    def credential_schema(self, credential_type: str) -> dict[str, Any]:
-        return self._request("GET", f"/credentials/schema/{quote(credential_type, safe='')}")
-
     # ------------------------------------------------------------------ workflows
 
     def create_workflow(self, workflow: dict[str, Any]) -> str:
@@ -77,15 +74,21 @@ class N8nClient:
         self._delete(f"/workflows/{quote(workflow_id, safe='')}")
 
     def executions(self, workflow_id: str, limit: int = 10) -> list[dict[str, Any]]:
-        data = self._request(
-            "GET",
-            "/executions",
-            params={"workflowId": workflow_id, "includeData": "true", "limit": limit},
-        )
+        """The latest executions, without their (large) data."""
+        data = self._request("GET", "/executions", params={"workflowId": workflow_id, "limit": limit})
         items = data.get("data") if isinstance(data, dict) else None
         if not isinstance(items, list):
             raise N8nError("n8n returned an unexpected execution list")
         return [item for item in items if isinstance(item, dict)]
+
+    def execution(self, execution_id: str) -> dict[str, Any]:
+        """One execution with its data (node outputs), for the result summary."""
+        data = self._request(
+            "GET", f"/executions/{quote(execution_id, safe='')}", params={"includeData": "true"}
+        )
+        if not isinstance(data, dict):
+            raise N8nError("n8n returned an unexpected execution")
+        return data
 
     # ------------------------------------------------------------------ webhooks
 

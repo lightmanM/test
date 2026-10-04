@@ -90,14 +90,20 @@ Notes: `n8n/client.py` (public API: credentials, workflows, `/publish` with `/ac
 webhook calls), `n8n/transform.py` (fills `__VALUE:x__` placeholders — whole values only, never a leading `=`
 so user input can't become an n8n expression; wires credential slots; adds the "Run now (demo)" Webhook node with
 header auth; keeps only API-accepted node/settings fields), `adapters/n8n.py` (deploy/undeploy/run/results) and
-`google.py` (uptime spreadsheet in the user's Drive). Deploy jobs read secrets on demand through
+`google.py` (uptime spreadsheet in the user's Drive; a redeploy reuses it via `DeployContext.previous_refs`, so
+edits to its Sites tab survive, and a new one is made only if the user deleted it). Deploy jobs read secrets on demand through
 `DeployContext.credentials` (`services.connections.UserCredentials`; Google tokens include the refresh token so n8n
 refreshes them with our OAuth client). Every credential is per deployment — including the owner's OpenAI key and
 reader token (no shared bootstrap) — and named `demo · <user> · <workflow> · <slot>`; a failed deploy deletes what it
 created (credentials, workflow, spreadsheet). The Run-now header token is an HMAC of the webhook path with the
 session secret (nothing stored). Results: executions with `includeData`, summarized from the catalog's
 `result_nodes` (uptime lines per site, digest/report text). The spreadsheet link is shown to the user (`links`).
-Platforms without owner credentials show "Not set up on this server yet (…)"; per-workflow config gaps are listed.
+Platforms without owner credentials show "Not set up on this server yet (…)"; per-workflow config gaps are listed
+(owner-provided values/credentials come from one table, `SHARED_VALUES` / `SHARED_CREDENTIALS`). The "no leading
+`=`" rule is checked at request time for n8n workflows (422 with field errors) and again in the transform.
+Review fixes: cleanup deletes each item independently and never logs tokens; fake connections are refused for
+secrets too; one Nango read per connector per deploy; run summaries fetch execution data once per finished
+execution (cached) instead of on every poll; `fresh_credentials` is the single Nango read path.
 - [x] n8n client (credentials, workflows, publish/activate fallback, executions, webhook)
 - [x] Transforms + golden tests for uptime, meegle digest, medium digest
 - [x] Google Sheet creation for uptime; owner-provided OpenAI + reader keys as per-deployment credentials
@@ -115,6 +121,8 @@ Platforms without owner credentials show "Not set up on this server yet (…)"; 
 
 ### P6 Lifecycle & admin
 - [ ] Sweeper: 24 h expiry, status reconcile
+- [ ] Orphan sweep: n8n workflows/credentials named `demo · …` / `[demo] …` that no deployment references
+  (left if a job process dies mid-deploy, since refs are saved only when `deploy()` returns)
 - [ ] Redeploy / delete hardening; admin page; setup check
 - [ ] E2E lifecycle tests
 
@@ -141,7 +149,7 @@ Platforms without owner credentials show "Not set up on this server yet (…)"; 
 | 2026-10-04 | Leaked Meegle token removed from git history (2 commits rewritten; `main` now at e7c40dc). Owner to revoke the token in Meegle. |
 
 ## Session log
-- 2026-10-04: PR #4 (P2) merged. P3 implemented: 112 backend tests (transform golden, adapter contract, API flow).
+- 2026-10-04: PR #4 (P2) merged. P3 implemented and reviewed (10 findings fixed): 117 backend tests (transform golden, adapter contract, API flow).
 - 2026-10-04: PR #3 (P1b) merged. P2 implemented and reviewed (10 findings fixed): 88 backend tests, 8 unit + 5 E2E (frontend).
 - 2026-10-04: PR #2 (P1a) merged. P1b implemented: 4 E2E + 3 unit (frontend), 70 backend tests.
 - 2026-10-04: PR #1 (P0) reviewed, fixed, CI green, merged. P1a implemented, reviewed (10 findings fixed): 69 tests passing.

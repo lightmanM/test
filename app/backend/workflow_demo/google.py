@@ -57,6 +57,27 @@ def create_uptime_sheet(http: httpx.Client, access_token: str, title: str, sites
         raise GoogleError("Google Sheets returned an unexpected response") from None
 
 
+def spreadsheet_url(http: httpx.Client, access_token: str, spreadsheet_id: str) -> str | None:
+    """The spreadsheet's URL if the user can still open it (not deleted), else None."""
+    try:
+        resp = http.get(
+            f"{SHEETS_API}/{quote(spreadsheet_id, safe='')}",
+            params={"fields": "spreadsheetId,spreadsheetUrl"},
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=30,
+        )
+    except httpx.HTTPError as exc:
+        raise GoogleError(f"Google Sheets is unreachable: {exc.__class__.__name__}") from None
+    if resp.status_code in (403, 404):
+        return None
+    if resp.status_code >= 400:
+        raise GoogleError(f"Google Sheets error {resp.status_code}: {_message(resp)}")
+    try:
+        return str(resp.json()["spreadsheetUrl"])
+    except (ValueError, KeyError, TypeError):
+        raise GoogleError("Google Sheets returned an unexpected response") from None
+
+
 def delete_file(http: httpx.Client, access_token: str, file_id: str) -> None:
     """Best effort: remove a file the demo created (drive.file scope covers it)."""
     with contextlib.suppress(httpx.HTTPError):

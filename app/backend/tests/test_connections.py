@@ -371,3 +371,6 @@ def test_user_credentials_for_deploy_jobs(live):
             creds.oauth_tokens("slack")
         with pytest.raises(AdapterError, match="Connect Meegle user key first"):
             creds.secret_value("meegle_user_key")
+    client.post("/api/connections/meegle_user_key/fake")
+    with svc.db.session() as db, pytest.raises(AdapterError, match="demo data"):
+        UserCredentials(svc, db.query(User).one()).secret_value("meegle_user_key")

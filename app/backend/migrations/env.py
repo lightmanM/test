@@ -10,7 +10,8 @@ from workflow_demo.db import Base, normalize_database_url
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Keep the app's loggers working when migrations run in-process (tests, startup scripts).
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 
 def database_url() -> str:

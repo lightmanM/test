@@ -29,7 +29,7 @@ class OAuthTokens:
     scope: str | None = None
 
 
-class CredentialSource(Protocol):
+class SecretReader(Protocol):
     """Reads the user's secrets on demand, only inside deploy jobs (never stored in refs)."""
 
     def oauth_tokens(self, connector: str, *, with_refresh_token: bool = False) -> OAuthTokens: ...
@@ -49,7 +49,9 @@ class DeployContext:
     # (Make Bridge redirectUri). Valid only for this deploy attempt.
     user_step_state: str | None = None
     callback_url: str | None = None
-    credentials: CredentialSource | None = None
+    credentials: SecretReader | None = None
+    # Refs of the deployment being replaced (redeploy only), e.g. to reuse the user's spreadsheet.
+    previous_refs: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

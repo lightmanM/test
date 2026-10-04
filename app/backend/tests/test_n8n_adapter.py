@@ -3,6 +3,7 @@
 import hashlib
 import hmac
 import json
+import logging
 
 import httpx
 import pytest
@@ -221,6 +222,78 @@ def test_failed_deploy_removes_what_it_created(adapter):
 
 
 @respx.mock
+def test_cleanup_continues_when_a_delete_fails(adapter, caplog):
+    caplog.set_level(logging.WARNING, logger="workflow_demo.adapters.n8n")
+    respx.post(SHEETS).mock(
+        return_value=httpx.Response(200, json={"spreadsheetId": "s-9", "spreadsheetUrl": "u"})
+    )
+    mock_credentials()
+    respx.post(f"{API}/workflows").mock(return_value=httpx.Response(200, json={"id": "wf-5"}))
+    respx.post(f"{API}/workflows/wf-5/publish").mock(
+        return_value=httpx.Response(400, json={"message": "bad"})
+    )
+    respx.delete(f"{API}/workflows/wf-5").mock(return_value=httpx.Response(500, json={"message": "down"}))
+    creds_deleted = respx.delete(url__regex=rf"{API}/credentials/.*").mock(return_value=httpx.Response(200))
+    respx.delete(url__regex=r"https://www.googleapis.com/drive/v3/files/.*").mock(
+        return_value=httpx.Response(204)
+    )
+    with pytest.raises(AdapterError):
+        adapter.deploy(context("uptime-monitor", UPTIME_SETTINGS))
+    assert creds_deleted.call_count == 3
+    assert "workflow wf-5" in caplog.text and "google-access" not in caplog.text
+
+
+@respx.mock
+def test_redeploy_reuses_the_spreadsheet(adapter):
+    mock_credentials()
+    created = respx.post(f"{API}/workflows").mock(return_value=httpx.Response(200, json={"id": "wf-2"}))
+    respx.post(f"{API}/workflows/wf-2/publish").mock(return_value=httpx.Response(200, json={}))
+    new_sheet = respx.post(SHEETS).mock(
+        return_value=httpx.Response(200, json={"spreadsheetId": "new", "spreadsheetUrl": "https://s/new"})
+    )
+    respx.get(f"{SHEETS}/old").mock(
+        return_value=httpx.Response(200, json={"spreadsheetId": "old", "spreadsheetUrl": "https://s/old"})
+    )
+    ctx = DeployContext(
+        username="alice",
+        workflow=CATALOG.workflow("uptime-monitor"),
+        deployment_id=7,
+        settings=UPTIME_SETTINGS,
+        connections={},
+        refs={},
+        credentials=Creds(),
+        previous_refs={"spreadsheet_id": "old", "workflow_id": "wf-1"},
+    )
+    result = adapter.deploy(ctx)
+    assert not new_sheet.called
+    assert result.refs["spreadsheet_id"] == "old" and result.refs["spreadsheet_url"] == "https://s/old"
+    assert "old" in json.dumps(json.loads(created.calls.last.request.content))
+
+    # The user deleted it: a new one is made.
+    respx.get(f"{SHEETS}/old").mock(return_value=httpx.Response(404, json={}))
+    assert adapter.deploy(ctx).refs["spreadsheet_id"] == "new"
+
+
+@respx.mock
+def test_google_is_read_once_per_deploy(adapter):
+    respx.post(SHEETS).mock(
+        return_value=httpx.Response(200, json={"spreadsheetId": "s", "spreadsheetUrl": "u"})
+    )
+    mock_credentials()
+    respx.post(f"{API}/workflows").mock(return_value=httpx.Response(200, json={"id": "wf-1"}))
+    respx.post(f"{API}/workflows/wf-1/publish").mock(return_value=httpx.Response(200, json={}))
+    creds = Creds()
+    adapter.deploy(context("uptime-monitor", UPTIME_SETTINGS, creds=creds))
+    assert creds.calls == [("google", True), ("slack", False)]
+
+
+def test_catalog_needs_only_supported_items(adapter):
+    for entry in CATALOG.workflows:
+        if entry.n8n:
+            assert not [m for m in adapter.missing_config(entry) if m.startswith("support")], entry.id
+
+
+@respx.mock
 def test_failed_publish_removes_the_workflow(adapter):
     mock_credentials()
     respx.post(f"{API}/workflows").mock(return_value=httpx.Response(200, json={"id": "wf-5"}))
@@ -327,19 +400,30 @@ def test_recent_runs(adapter):
         "stoppedAt": "2026-10-04T04:00:01.000Z",
         "data": {"resultData": {"runData": {}, "error": {"message": "Sheet not found"}}},
     }
-    route = respx.get(f"{API}/executions").mock(
-        return_value=httpx.Response(
-            200, json={"data": [uptime_execution(), failed, {"id": "99", "status": "running"}]}
-        )
+    listed = [
+        {k: v for k, v in e.items() if k != "data"}
+        for e in (uptime_execution(), failed, {"id": "99", "status": "running"})
+    ]
+    route = respx.get(f"{API}/executions").mock(return_value=httpx.Response(200, json={"data": listed}))
+    detail_101 = respx.get(f"{API}/executions/101").mock(
+        return_value=httpx.Response(200, json=uptime_execution())
     )
-    runs = adapter.recent_runs(context("uptime-monitor", UPTIME_SETTINGS, refs={"workflow_id": "wf-1"}))
+    detail_100 = respx.get(f"{API}/executions/100").mock(return_value=httpx.Response(200, json=failed))
+    ctx = context("uptime-monitor", UPTIME_SETTINGS, refs={"workflow_id": "wf-1"})
+
+    runs = adapter.recent_runs(ctx)
     params = route.calls.last.request.url.params
-    assert params["workflowId"] == "wf-1" and params["includeData"] == "true"
+    assert params["workflowId"] == "wf-1" and "includeData" not in params  # list stays small
+    assert detail_101.calls.last.request.url.params["includeData"] == "true"
     assert runs[0].summary == "https://example.com is UP\nhttps://bad.example is DOWN (alert sent)"
     assert runs[0].status == "success" and runs[0].finished_at.second == 9
     assert runs[1].status == "error" and runs[1].error == "Sheet not found"
     assert runs[2].status == "running" and runs[2].summary is None
     assert adapter.recent_runs(context("uptime-monitor", UPTIME_SETTINGS)) == []
+
+    # Finished executions are summarized once; polling doesn't download their data again.
+    assert adapter.recent_runs(ctx) == runs
+    assert detail_101.call_count == 1 and detail_100.call_count == 1
 
 
 def test_summaries_for_text_reports():

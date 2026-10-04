@@ -12,7 +12,10 @@ import hashlib
 import hmac
 import json
 import logging
+import threading
 import uuid
+from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -25,8 +28,10 @@ from workflow_demo.adapters.base import (
     Availability,
     DeployContext,
     DeployResult,
+    OAuthTokens,
     RunStarted,
     RunSummary,
+    SecretReader,
 )
 from workflow_demo.catalog.loader import load_template
 from workflow_demo.catalog.models import (
@@ -42,9 +47,42 @@ from workflow_demo.n8n.transform import RUN_HEADER, CredentialRef, RunHook, Tran
 
 log = logging.getLogger(__name__)
 
+
+@dataclass(frozen=True)
+class OwnerItem:
+    """Something built from the owner's configuration: the settings it needs and how to build it."""
+
+    needs: tuple[str, ...]  # Settings attribute names (also the env var names, upper-cased)
+    build: Callable[[Settings], Any]
+
+
+def _secret(value: Any) -> str:
+    return value.get_secret_value() if value is not None else ""
+
+
+# The catalog declares `shared` values / credentials by name; this is where each one comes from.
+SHARED_VALUES: dict[str, OwnerItem] = {
+    "reader_url": OwnerItem(("reader_base_url",), lambda s: f"{s.reader_base_url.rstrip('/')}/extract"),
+    "llm_endpoint": OwnerItem((), lambda s: f"{s.openai_base_url.rstrip('/')}/chat/completions"),
+}
+SHARED_CREDENTIALS: dict[str, OwnerItem] = {
+    "openai": OwnerItem(
+        ("openai_api_key",),
+        lambda s: {"apiKey": _secret(s.openai_api_key), "url": s.openai_base_url.rstrip("/")},
+    ),
+    "reader": OwnerItem(
+        ("reader_base_url", "reader_api_token"),
+        lambda s: {"name": "Authorization", "value": f"Bearer {_secret(s.reader_api_token)}"},
+    ),
+}
+# Google credentials need our OAuth client so n8n can refresh the user's tokens.
 GOOGLE_TYPES = {"googleSheetsOAuth2Api", "gmailOAuth2"}
+GOOGLE_NEEDS = ("google_client_id", "google_client_secret")
+# `deploy` values the adapter produces while deploying.
+DEPLOY_VALUES = {"spreadsheet_id"}
 # Header each manual secret is sent in (the template's HTTP nodes use an httpHeaderAuth slot).
 SECRET_HEADERS = {"meegle_mcp_token": "X-Mcp-Token"}
+
 STATUS = {
     "success": "success",
     "error": "error",
@@ -55,6 +93,7 @@ STATUS = {
     "unknown": "running",
     "waiting": "waiting",
 }
+FINAL = {"success", "error", "crashed", "canceled"}
 MAX_SUMMARY = 4000
 
 
@@ -64,9 +103,27 @@ class _Created:
 
     credential_ids: list[str] = field(default_factory=list)
     workflow_id: str | None = None
-    spreadsheet_id: str | None = None
+    spreadsheet_id: str | None = None  # only set when this deploy created it
     spreadsheet_url: str | None = None
-    google_token: str | None = None
+    google_token: str | None = field(default=None, repr=False)
+
+
+class _CachedSecrets:
+    """One Nango read per connector per deploy (a refresh-token read also serves plain reads)."""
+
+    def __init__(self, inner: SecretReader) -> None:
+        self._inner = inner
+        self._tokens: dict[str, OAuthTokens] = {}
+
+    def oauth_tokens(self, connector: str, *, with_refresh_token: bool = False) -> OAuthTokens:
+        cached = self._tokens.get(connector)
+        if cached is None or (with_refresh_token and not cached.refresh_token):
+            cached = self._inner.oauth_tokens(connector, with_refresh_token=with_refresh_token)
+            self._tokens[connector] = cached
+        return cached
+
+    def secret_value(self, connector: str) -> str:
+        return self._inner.secret_value(connector)
 
 
 class N8nAdapter:
@@ -79,62 +136,86 @@ class N8nAdapter:
         self._run_key = hashlib.sha256(
             b"n8n-run:" + settings.session_secret.get_secret_value().encode()
         ).digest()
+        # Finished executions never change: summarize each once (bounded, per process).
+        self._summaries: OrderedDict[str, RunSummary] = OrderedDict()
+        self._summaries_lock = threading.Lock()
 
     # ------------------------------------------------------------------ availability
 
     def check_available(self, entry: WorkflowEntry | None = None) -> Availability:
-        missing = self._missing_config(entry) if entry is not None else []
+        missing = self.missing_config(entry) if entry is not None else []
         if missing:
             return Availability(False, f"Not set up on this server yet (missing {', '.join(missing)})")
         return Availability(True)
 
-    def _missing_config(self, entry: WorkflowEntry) -> list[str]:
-        s = self._settings
-        needs: list[str] = []
+    def missing_config(self, entry: WorkflowEntry) -> list[str]:
         spec = entry.n8n
         if spec is None:
             return ["n8n template"]
+        needs: set[str] = set()
+        problems: set[str] = set()
+        for name, source in spec.values.items():
+            if source is ValueSource.SHARED:
+                item = SHARED_VALUES.get(name)
+                needs.update(item.needs if item else ())
+                if item is None:
+                    problems.add(f"support for shared value {name!r}")
+            elif source is ValueSource.DEPLOY and name not in DEPLOY_VALUES:
+                problems.add(f"support for deploy value {name!r}")
+            elif source is ValueSource.CONNECTION:
+                problems.add(f"support for connection value {name!r}")
         for slot in spec.credentials.values():
-            if slot.type in GOOGLE_TYPES and not (s.google_client_id and s.google_client_secret):
-                needs.append("GOOGLE_CLIENT_ID/SECRET")
-            if slot.source is CredentialSource.SHARED and slot.ref == "openai" and not s.openai_api_key:
-                needs.append("OPENAI_API_KEY")
-            if (
-                slot.source is CredentialSource.SHARED
-                and slot.ref == "reader"
-                and not (s.reader_base_url and s.reader_api_token)
-            ):
-                needs.append("READER_BASE_URL/READER_API_TOKEN")
-        return sorted(set(needs))
+            if slot.source is CredentialSource.SHARED:
+                item = SHARED_CREDENTIALS.get(slot.ref)
+                needs.update(item.needs if item else ())
+                if item is None:
+                    problems.add(f"support for shared credential {slot.ref!r}")
+            elif slot.type in GOOGLE_TYPES:
+                needs.update(GOOGLE_NEEDS)
+            elif slot.type == "httpHeaderAuth" and slot.ref not in SECRET_HEADERS:
+                problems.add(f"support for a {slot.ref} header credential")
+            elif slot.type not in GOOGLE_TYPES | {"slackApi", "httpHeaderAuth"}:
+                problems.add(f"support for {slot.type} credentials")
+        unset = {name.upper() for name in needs if not getattr(self._settings, name, None)}
+        return sorted(unset) + sorted(problems)
 
     # ------------------------------------------------------------------ deploy
 
     def deploy(self, ctx: DeployContext) -> DeployResult:
         entry = ctx.workflow
-        if self._missing_config(entry):
-            raise AdapterError(self.check_available(entry).reason or "Not set up on this server yet")
+        missing = self.missing_config(entry)
+        if missing:
+            raise AdapterError(f"Not set up on this server yet (missing {', '.join(missing)})")
         spec = entry.n8n
+        secrets = _CachedSecrets(self._secrets(ctx))
         created = _Created()
         prefix = f"demo · {ctx.username} · {entry.id}"
+        sheet: dict[str, str] = {}
         try:
-            values = {name: self._value(ctx, name, source, created) for name, source in spec.values.items()}
+            values = {}
+            for name, source in spec.values.items():
+                if source is ValueSource.SETTING:
+                    values[name] = ctx.settings.get(name, "")
+                elif source is ValueSource.SHARED:
+                    values[name] = SHARED_VALUES[name].build(self._settings)
+                else:  # DEPLOY: spreadsheet_id (checked by missing_config)
+                    sheet = self._spreadsheet(ctx, secrets, created)
+                    values[name] = sheet["spreadsheet_id"]
             credentials = {}
             for slot_name, slot in spec.credentials.items():
                 credentials[slot_name] = self._create_credential(
-                    created, f"{prefix} · {slot_name}", slot.type, self._credential_data(ctx, slot)
+                    created, f"{prefix} · {slot_name}", slot.type, self._credential_data(slot, secrets)
                 )
             hook = None
             if entry.run_now:
                 path = str(uuid.uuid4())
-                hook = RunHook(
-                    path=path,
-                    credential=self._create_credential(
-                        created,
-                        f"{prefix} · run now",
-                        "httpHeaderAuth",
-                        {"name": RUN_HEADER, "value": self._run_token(path)},
-                    ),
+                run_credential = self._create_credential(
+                    created,
+                    f"{prefix} · run now",
+                    "httpHeaderAuth",
+                    {"name": RUN_HEADER, "value": self._run_token(path)},
                 )
+                hook = RunHook(path=path, credential=run_credential)
             workflow = build_workflow(
                 load_template(entry),
                 name=f"[demo] {entry.name} · {ctx.username}",
@@ -155,26 +236,21 @@ class N8nAdapter:
             "workflow_id": created.workflow_id,
             "credential_ids": created.credential_ids,
             "workflow_url": f"{self._client.base_url}/workflow/{created.workflow_id}",
+            **sheet,
         }
         if hook is not None:
             refs["webhook_path"] = hook.path
-        if created.spreadsheet_id:
-            refs["spreadsheet_id"] = created.spreadsheet_id
-            refs["spreadsheet_url"] = created.spreadsheet_url
         return DeployResult(refs=refs, message="Deployed and published on n8n")
 
     def finish_user_step(self, ctx: DeployContext, params: dict[str, str]) -> DeployResult:
         raise AdapterError("n8n deployments have no popup step")
 
     def undeploy(self, ctx: DeployContext) -> None:
+        """Remove the workflow and its credentials. The user's spreadsheet stays in their Drive."""
         refs = ctx.refs
-        try:
-            if refs.get("workflow_id"):
-                self._client.delete_workflow(str(refs["workflow_id"]))  # also unpublishes
-            for credential_id in refs.get("credential_ids") or []:
-                self._client.delete_credential(str(credential_id))
-        except N8nError as exc:
-            raise AdapterError(f"Couldn't remove the n8n workflow: {exc}") from None
+        failures = self._delete_all(refs.get("workflow_id"), refs.get("credential_ids") or [])
+        if failures:
+            raise AdapterError(f"Couldn't remove everything from n8n: {failures[0]}")
 
     # ------------------------------------------------------------------ runs
 
@@ -198,18 +274,41 @@ class N8nAdapter:
         workflow_id = ctx.refs.get("workflow_id")
         if not workflow_id:
             return []
+        result_nodes = ctx.workflow.n8n.result_nodes if ctx.workflow.n8n else []
         try:
-            executions = self._client.executions(str(workflow_id), limit=limit)
+            return [
+                self._summary(e, result_nodes) for e in self._client.executions(str(workflow_id), limit=limit)
+            ]
         except N8nError as exc:
             raise AdapterError(f"Couldn't read runs from n8n: {exc}") from None
-        result_nodes = ctx.workflow.n8n.result_nodes if ctx.workflow.n8n else []
-        return [summarize_execution(e, result_nodes) for e in executions]
+
+    def _summary(self, listed: dict[str, Any], result_nodes: list[str]) -> RunSummary:
+        """Summaries need the execution's data: fetched once, when the execution has finished."""
+        execution_id = str(listed.get("id"))
+        if listed.get("status") not in FINAL:
+            return summarize_execution(listed, result_nodes)
+        with self._summaries_lock:
+            cached = self._summaries.get(execution_id)
+        if cached is not None:
+            return cached
+        summary = summarize_execution(self._client.execution(execution_id), result_nodes)
+        with self._summaries_lock:
+            self._summaries[execution_id] = summary
+            while len(self._summaries) > 500:
+                self._summaries.popitem(last=False)
+        return summary
 
     # ------------------------------------------------------------------ helpers
 
     def _run_token(self, path: str) -> str:
         """Derived from a server secret, so it never needs storing."""
         return hmac.new(self._run_key, path.encode(), hashlib.sha256).hexdigest()
+
+    @staticmethod
+    def _secrets(ctx: DeployContext) -> SecretReader:
+        if ctx.credentials is None:
+            raise AdapterError("No access to your connections in this job")
+        return ctx.credentials
 
     def _create_credential(
         self, created: _Created, name: str, credential_type: str, data: dict[str, Any]
@@ -218,21 +317,15 @@ class N8nAdapter:
         created.credential_ids.append(credential_id)
         return CredentialRef(id=credential_id, name=name)
 
-    def _value(self, ctx: DeployContext, name: str, source: ValueSource, created: _Created) -> Any:
-        s = self._settings
-        if source is ValueSource.SETTING:
-            return ctx.settings.get(name, "")
-        if source is ValueSource.SHARED:
-            if name == "reader_url":
-                return f"{(s.reader_base_url or '').rstrip('/')}/extract"
-            if name == "llm_endpoint":
-                return f"{s.openai_base_url.rstrip('/')}/chat/completions"
-        if source is ValueSource.DEPLOY and name == "spreadsheet_id":
-            return self._create_spreadsheet(ctx, created)
-        raise AdapterError(f"Don't know how to provide {name!r} ({source.value})")
-
-    def _create_spreadsheet(self, ctx: DeployContext, created: _Created) -> str:
-        tokens = self._credentials(ctx).oauth_tokens("google")
+    def _spreadsheet(self, ctx: DeployContext, secrets: SecretReader, created: _Created) -> dict[str, str]:
+        """Reuse the previous deployment's spreadsheet on redeploy (keeps the user's Sites edits);
+        otherwise create one seeded from the ``sites`` setting."""
+        tokens = secrets.oauth_tokens("google", with_refresh_token=True)
+        previous = ctx.previous_refs.get("spreadsheet_id")
+        if previous:
+            url = google.spreadsheet_url(self._http, tokens.access_token, str(previous))
+            if url:
+                return {"spreadsheet_id": str(previous), "spreadsheet_url": url}
         sites = [str(site) for site in ctx.settings.get("sites") or []]
         stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
         sheet = google.create_uptime_sheet(
@@ -240,19 +333,14 @@ class N8nAdapter:
         )
         created.spreadsheet_id, created.spreadsheet_url = sheet.id, sheet.url
         created.google_token = tokens.access_token
-        return sheet.id
+        return {"spreadsheet_id": sheet.id, "spreadsheet_url": sheet.url}
 
-    def _credential_data(self, ctx: DeployContext, slot: CredentialSlot) -> dict[str, Any]:
+    def _credential_data(self, slot: CredentialSlot, secrets: SecretReader) -> dict[str, Any]:
         s = self._settings
         if slot.source is CredentialSource.SHARED:
-            if slot.ref == "openai" and s.openai_api_key:
-                return {"apiKey": s.openai_api_key.get_secret_value(), "url": s.openai_base_url.rstrip("/")}
-            if slot.ref == "reader" and s.reader_api_token:
-                return {"name": "Authorization", "value": f"Bearer {s.reader_api_token.get_secret_value()}"}
-            raise AdapterError(f"Shared credential {slot.ref!r} isn't configured")
-        credentials = self._credentials(ctx)
+            return SHARED_CREDENTIALS[slot.ref].build(s)
         if slot.type in GOOGLE_TYPES:
-            tokens = credentials.oauth_tokens(slot.ref, with_refresh_token=True)
+            tokens = secrets.oauth_tokens(slot.ref, with_refresh_token=True)
             token_data = {
                 "access_token": tokens.access_token,
                 "refresh_token": tokens.refresh_token,
@@ -262,29 +350,35 @@ class N8nAdapter:
                 token_data["scope"] = tokens.scope
             return {
                 "clientId": s.google_client_id,
-                "clientSecret": s.google_client_secret.get_secret_value() if s.google_client_secret else "",
+                "clientSecret": _secret(s.google_client_secret),
                 "oauthTokenData": token_data,
             }
         if slot.type == "slackApi":
-            return {"accessToken": credentials.oauth_tokens(slot.ref).access_token}
-        if slot.type == "httpHeaderAuth" and slot.ref in SECRET_HEADERS:
-            return {"name": SECRET_HEADERS[slot.ref], "value": credentials.secret_value(slot.ref)}
-        raise AdapterError(f"Don't know how to build a {slot.type} credential from {slot.ref}")
+            return {"accessToken": secrets.oauth_tokens(slot.ref).access_token}
+        if slot.type == "httpHeaderAuth":
+            return {"name": SECRET_HEADERS[slot.ref], "value": secrets.secret_value(slot.ref)}
+        raise AdapterError(f"Don't know how to build a {slot.type} credential")  # missing_config reports it
 
-    @staticmethod
-    def _credentials(ctx: DeployContext):
-        if ctx.credentials is None:
-            raise AdapterError("No access to your connections in this job")
-        return ctx.credentials
+    def _delete_all(self, workflow_id: Any, credential_ids: list[Any]) -> list[str]:
+        """Delete each item independently, so one failure doesn't strand the rest."""
+        failures = []
+        if workflow_id:
+            try:
+                self._client.delete_workflow(str(workflow_id))  # also unpublishes
+            except N8nError as exc:
+                failures.append(f"workflow {workflow_id}: {exc}")
+        for credential_id in credential_ids:
+            try:
+                self._client.delete_credential(str(credential_id))
+            except N8nError as exc:
+                failures.append(f"credential {credential_id}: {exc}")
+        return failures
 
     def _cleanup(self, created: _Created) -> None:
-        try:
-            if created.workflow_id:
-                self._client.delete_workflow(created.workflow_id)
-            for credential_id in created.credential_ids:
-                self._client.delete_credential(credential_id)
-        except N8nError:
-            log.warning("couldn't clean up after a failed n8n deploy: %s", created, exc_info=True)
+        failures = self._delete_all(created.workflow_id, created.credential_ids)
+        if failures:
+            # IDs only: the names identify the user and workflow, and nothing secret is logged.
+            log.warning("couldn't clean up after a failed n8n deploy: %s", "; ".join(failures))
         if created.spreadsheet_id and created.google_token:
             google.delete_file(self._http, created.google_token, created.spreadsheet_id)
 
@@ -306,16 +400,16 @@ def summarize_execution(execution: dict[str, Any], result_nodes: list[str]) -> R
     if len(summary) > MAX_SUMMARY:
         summary = summary[: MAX_SUMMARY - 1] + "…"
     error = result.get("error") if isinstance(result.get("error"), dict) else {}
-    status = STATUS.get(str(execution.get("status")), "running")
+    message = str(error["message"])[:500] if error.get("message") else None
+    if message is None and execution.get("status") == "canceled":
+        message = "Canceled"
     return RunSummary(
         id=str(execution.get("id")),
-        status=status,
+        status=STATUS.get(str(execution.get("status")), "running"),
         started_at=_parse_time(execution.get("startedAt")),
         finished_at=_parse_time(execution.get("stoppedAt")),
         summary=summary or None,
-        error=str(error.get("message"))[:500]
-        if error.get("message")
-        else ("Canceled" if execution.get("status") == "canceled" else None),
+        error=message,
     )
 
 
@@ -333,9 +427,9 @@ def _result_data(execution: dict[str, Any]) -> dict[str, Any]:
 
 
 def _main_items(run: Any) -> list[Any]:
-    if not isinstance(run, dict):
+    if not isinstance(run, dict) or not isinstance(run.get("data"), dict):
         return []
-    main = (run.get("data") or {}).get("main") if isinstance(run.get("data"), dict) else None
+    main = run["data"].get("main")
     if not isinstance(main, list) or not main or not isinstance(main[0], list):
         return []
     return main[0]

@@ -28,11 +28,11 @@ from workflow_demo.adapters.base import (
     RunStarted,
     RunSummary,
 )
-from workflow_demo.catalog.models import ConnectorKind, WorkflowEntry
+from workflow_demo.catalog.models import ConnectorKind, Platform, WorkflowEntry
 from workflow_demo.db import Connection, Deployment, DeploymentEvent, Job, User, utcnow
 from workflow_demo.services.connections import UserCredentials
 from workflow_demo.services.container import AppServices
-from workflow_demo.services.settings_schema import validate_settings
+from workflow_demo.services.settings_schema import reject_expressions, validate_settings
 from workflow_demo.services.states import BUSY, Status, check_transition
 
 log = logging.getLogger(__name__)
@@ -135,6 +135,7 @@ def build_context(
     *,
     refs: dict[str, Any] | None = None,
     user_step_state: str | None = None,
+    previous_refs: dict[str, Any] | None = None,
 ) -> DeployContext:
     return DeployContext(
         username=dep.user.username,
@@ -158,6 +159,7 @@ def build_context(
         if user_step_state
         else None,
         credentials=UserCredentials(svc, dep.user),
+        previous_refs=dict(previous_refs or {}),
     )
 
 
@@ -183,6 +185,8 @@ def request_deploy(
     if not avail.available:
         raise DeploymentError(avail.reason or "Deploy unavailable")
     cleaned = validate_settings(entry.settings, raw)  # SettingsError -> 422 in the API layer
+    if entry.platform is Platform.N8N:
+        reject_expressions(cleaned)
     missing = missing_connectors(svc, entry, active_connectors(user))
     if missing:
         names = ", ".join(svc.catalog.connectors[m].name for m in missing)
@@ -336,7 +340,8 @@ def run_job(svc: AppServices, job_id: int) -> None:
 def _execute(svc: AppServices, db: Session, job: Job, dep: Deployment) -> None:
     entry = svc.catalog.workflow(dep.workflow_id)
     adapter = svc.registry.get(entry.platform)
-    if job.kind in ("redeploy", "undeploy", "expire") and dep.platform_refs:
+    previous_refs = dict(dep.platform_refs or {})
+    if job.kind in ("redeploy", "undeploy", "expire") and previous_refs:
         adapter.undeploy(build_context(svc, dep, entry))  # old settings + old refs
         dep.platform_refs = {}
         add_event(dep, "removed", "Removed the previous deployment from the platform")
@@ -344,7 +349,8 @@ def _execute(svc: AppServices, db: Session, job: Job, dep: Deployment) -> None:
         dep.inputs = dict((job.payload or {}).get("settings", {}))
         nonce = secrets.token_urlsafe(16)
         state = svc.signer.dumps({"deployment_id": dep.id, "nonce": nonce}, USER_STEP_PURPOSE)
-        result = adapter.deploy(build_context(svc, dep, entry, refs={}, user_step_state=state))
+        context = build_context(svc, dep, entry, refs={}, user_step_state=state, previous_refs=previous_refs)
+        result = adapter.deploy(context)
         _apply_result(svc, dep, result, nonce=nonce)
         return
     set_status(dep, Status.STOPPED)

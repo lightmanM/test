@@ -1,7 +1,7 @@
 import pytest
 
 from workflow_demo.catalog.models import Setting, SettingType
-from workflow_demo.services.settings_schema import SettingsError, validate_settings
+from workflow_demo.services.settings_schema import SettingsError, reject_expressions, validate_settings
 
 SCHEMA = [
     Setting(key="channel", label="Channel", type=SettingType.SLACK_CHANNEL),
@@ -31,10 +31,16 @@ def test_defaults_applied_and_strings_trimmed():
         ({"channel": "C0123ABCD", "count": "3"}, "count"),
         ({"channel": "C0123ABCD", "count": True}, "count"),
         ({"channel": "C0123ABCD", "extra": 1}, "extra"),
-        ({"channel": "C0123ABCD", "name": "={{ $env.SECRET }}"}, "name"),
     ],
 )
 def test_invalid_values(given, field):
     with pytest.raises(SettingsError) as info:
         validate_settings(SCHEMA, given)
     assert field in info.value.errors
+
+
+def test_reject_expressions():
+    reject_expressions({"name": "a=b", "sites": ["https://x"], "count": 3})
+    with pytest.raises(SettingsError) as info:
+        reject_expressions({"name": "={{ $env.SECRET }}", "sites": ["=1"], "ok": "fine"})
+    assert set(info.value.errors) == {"name", "sites"}

@@ -105,29 +105,16 @@ def test_uptime_deploy_run_and_delete(real):
 
     respx.post(url__regex=rf"{N8N}/webhook/.*").mock(return_value=httpx.Response(200, json={}))
     assert client.post("/api/deployments/uptime-monitor/run").status_code == 202
-    respx.get(f"{API}/executions").mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "data": [
-                    {
-                        "id": "1",
-                        "status": "success",
-                        "startedAt": "2026-10-04T05:00:00Z",
-                        "stoppedAt": "2026-10-04T05:00:03Z",
-                        "data": {
-                            "resultData": {
-                                "runData": {
-                                    "Calculate Status": [
-                                        {"data": {"main": [[{"json": {"Property": "https://example.com"}}]]}}
-                                    ]
-                                }
-                            }
-                        },
-                    }
-                ]
-            },
-        )
+    execution = {
+        "id": "1",
+        "status": "success",
+        "startedAt": "2026-10-04T05:00:00Z",
+        "stoppedAt": "2026-10-04T05:00:03Z",
+    }
+    respx.get(f"{API}/executions").mock(return_value=httpx.Response(200, json={"data": [execution]}))
+    run_data = {"Calculate Status": [{"data": {"main": [[{"json": {"Property": "https://example.com"}}]]}}]}
+    respx.get(f"{API}/executions/1").mock(
+        return_value=httpx.Response(200, json={**execution, "data": {"resultData": {"runData": run_data}}})
     )
     runs = client.get("/api/deployments/uptime-monitor/runs").json()
     assert runs[0]["summary"] == "https://example.com is UP"
@@ -137,6 +124,22 @@ def test_uptime_deploy_run_and_delete(real):
     assert client.delete("/api/deployments/uptime-monitor").status_code == 202
     assert client.get("/api/workflows/uptime-monitor").json()["deployment"]["status"] == "stopped"
     assert wf_deleted.called and cred_deleted.call_count == 3
+
+
+def test_n8n_settings_must_stay_literal(real):
+    svc, client = real
+    resp = client.post(
+        "/api/deployments/meegle-daily-digest",
+        json={
+            "settings": {
+                "slack_channel": "C0123ABCD",
+                "meegle_project_key": "={{ $env.N8N_ENCRYPTION_KEY }}",
+                "meegle_simple_name": "space",
+            }
+        },
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["fields"] == {"meegle_project_key": "can't start with '='"}
 
 
 @respx.mock

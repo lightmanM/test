@@ -45,8 +45,6 @@ def validate_settings(schema: list[Setting], given: dict[str, Any]) -> dict[str,
         if setting.type is SettingType.STRING:
             if not isinstance(value, str) or len(value) > 200:
                 errors[setting.key] = "must be text (max 200 characters)"
-            elif value.startswith("="):  # n8n would evaluate it as an expression
-                errors[setting.key] = "can't start with '='"
         elif setting.type is SettingType.NUMBER:
             if isinstance(value, bool) or not isinstance(value, int | float):
                 errors[setting.key] = "must be a number"
@@ -68,3 +66,17 @@ def validate_settings(schema: list[Setting], given: dict[str, Any]) -> dict[str,
     if errors:
         raise SettingsError(errors)
     return cleaned
+
+
+def reject_expressions(cleaned: dict[str, Any]) -> None:
+    """n8n evaluates a parameter starting with "=" as an expression; settings must stay literal."""
+    errors = {
+        key: "can't start with '='"
+        for key, value in cleaned.items()
+        if isinstance(value, str)
+        and value.startswith("=")
+        or isinstance(value, list)
+        and any(isinstance(v, str) and v.startswith("=") for v in value)
+    }
+    if errors:
+        raise SettingsError(errors)

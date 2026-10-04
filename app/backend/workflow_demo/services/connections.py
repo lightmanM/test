@@ -183,16 +183,26 @@ def _google_email(svc: AppServices, access_token: str | None) -> str | None:
         return None
 
 
-def fresh_credentials(svc: AppServices, record: Connection) -> NangoConnection:
-    """The connection with a valid access token (Nango refreshes expired ones); used by deploys."""
+def fresh_credentials(
+    svc: AppServices, record: Connection, *, include_refresh_token: bool = False
+) -> NangoConnection:
+    """The connection with a valid access token (Nango refreshes expired ones); used by deploys.
+
+    ``include_refresh_token`` only when another platform must refresh the token itself (n8n)."""
+    if record.method != "nango":
+        raise ConnectionError_(f"{record.connector} isn't connected through Nango")
     try:
-        return _nango(svc).get_connection(record.nango_connection_id, record.nango_integration)
+        return _nango(svc).get_connection(
+            record.nango_connection_id,
+            record.nango_integration,
+            include_refresh_token=include_refresh_token,
+        )
     except NangoError as exc:
         raise ConnectionError_(f"Couldn't read the {record.connector} connection: {exc}", 502) from None
 
 
 class UserCredentials:
-    """A user's secrets for deploy jobs (``adapters.base.CredentialSource``); read on demand."""
+    """A user's secrets for deploy jobs (``adapters.base.SecretReader``); read on demand."""
 
     def __init__(self, svc: AppServices, user: User) -> None:
         self._svc = svc
@@ -209,17 +219,11 @@ class UserCredentials:
         return found.name if found else connector_id
 
     def oauth_tokens(self, connector: str, *, with_refresh_token: bool = False) -> OAuthTokens:
-        record = self._record(connector)
-        if record.method != "nango":
-            raise AdapterError(f"{self._name(connector)} was connected with demo data; connect it for real")
+        record = self._real(connector)
         try:
-            conn = _nango(self._svc).get_connection(
-                record.nango_connection_id,
-                record.nango_integration,
-                include_refresh_token=with_refresh_token,
-            )
-        except (NangoError, ConnectionError_) as exc:
-            raise AdapterError(f"Couldn't read your {self._name(connector)} connection: {exc}") from None
+            conn = fresh_credentials(self._svc, record, include_refresh_token=with_refresh_token)
+        except ConnectionError_ as exc:
+            raise AdapterError(exc.message) from None
         if not conn.access_token:
             raise AdapterError(f"Your {self._name(connector)} connection has no access token; reconnect it")
         if with_refresh_token and not conn.refresh_token:
@@ -232,9 +236,17 @@ class UserCredentials:
 
     def secret_value(self, connector: str) -> str:
         try:
-            return read_secret(self._svc, self._user, self._record(connector))
+            return read_secret(self._svc, self._user, self._real(connector))
         except ConnectionError_ as exc:
             raise AdapterError(exc.message) from None
+
+    def _real(self, connector_id: str) -> Connection:
+        record = self._record(connector_id)
+        if record.method == "fake":
+            raise AdapterError(
+                f"{self._name(connector_id)} was connected with demo data; connect it for real"
+            )
+        return record
 
 
 # ----------------------------------------------------------------------------- manual values
