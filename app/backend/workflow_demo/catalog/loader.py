@@ -43,6 +43,8 @@ def _read_yaml(path: Path) -> Any:
 
 def load_catalog(catalog_dir: Path | None = None) -> Catalog:
     catalog_dir = catalog_dir or paths.CATALOG_DIR
+    if not (catalog_dir / "connectors.yaml").exists():
+        raise CatalogError(f"no catalog at {catalog_dir} (set WORKFLOW_DEMO_CATALOG_DIR)")
     connectors = {
         key: Connector(id=key, **raw) for key, raw in _read_yaml(catalog_dir / "connectors.yaml").items()
     }

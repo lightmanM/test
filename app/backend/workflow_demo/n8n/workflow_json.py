@@ -81,10 +81,24 @@ def connect(wf: Workflow, source: str, target: str, *, output: int = 0, input_in
         branches[output].append({"node": target, "type": "main", "index": input_index})
 
 
-def disconnect(wf: Workflow, source: str, target: str) -> None:
+def edges(wf: Workflow, source: str, target: str) -> list[tuple[int, dict[str, Any]]]:
+    """Return ``(output_index, edge)`` for every edge ``source -> target``."""
+    branches = wf.get("connections", {}).get(source, {}).get("main", [])
+    return [
+        (output, edge)
+        for output, branch in enumerate(branches)
+        for edge in (branch or [])
+        if edge["node"] == target
+    ]
+
+
+def disconnect(wf: Workflow, source: str, target: str, *, output: int | None = None) -> None:
+    """Remove edges ``source -> target`` (only on ``output`` if given)."""
     branches = wf.get("connections", {}).get(source, {}).get("main", [])
     found = False
     for i, branch in enumerate(branches):
+        if output is not None and i != output:
+            continue
         kept = [edge for edge in (branch or []) if edge["node"] != target]
         found = found or len(kept) != len(branch or [])
         branches[i] = kept
@@ -92,12 +106,31 @@ def disconnect(wf: Workflow, source: str, target: str) -> None:
         raise WorkflowEditError(f"no connection {source!r} -> {target!r}")
 
 
-def insert_between(wf: Workflow, source: str, target: str, new: Node, *, new_output: int = 0) -> None:
-    """Replace the edge ``source -> target`` with ``source -> new -> target``."""
-    disconnect(wf, source, target)
+def insert_between(
+    wf: Workflow,
+    source: str,
+    target: str,
+    new: Node,
+    *,
+    output: int | None = None,
+    new_output: int = 0,
+) -> None:
+    """Replace the edge ``source -> target`` with ``source -> new -> target``.
+
+    The source output (e.g. an IF node's false branch) and the target input (e.g. a Merge
+    node's second input) of the original edge are preserved. ``output`` picks the edge when
+    the source connects to the target from more than one output.
+    """
+    candidates = [(o, e) for o, e in edges(wf, source, target) if output is None or o == output]
+    if len(candidates) != 1:
+        raise WorkflowEditError(
+            f"expected one connection {source!r} -> {target!r}, found {len(candidates)}; pass output="
+        )
+    source_output, edge = candidates[0]
+    disconnect(wf, source, target, output=source_output)
     add_node(wf, new)
-    connect(wf, source, new["name"])
-    connect(wf, new["name"], target, output=new_output)
+    connect(wf, source, new["name"], output=source_output)
+    connect(wf, new["name"], target, output=new_output, input_index=edge.get("index", 0))
 
 
 def set_credential_slot(n: Node, credential_type: str, slot: str) -> None:

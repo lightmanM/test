@@ -3,6 +3,8 @@ import re
 
 from workflow_demo import paths
 from workflow_demo.catalog import fixes
+from workflow_demo.catalog.build import targets
+from workflow_demo.catalog.loader import load_catalog
 from workflow_demo.n8n import workflow_json as wj
 
 SECRET_PATTERNS = [
@@ -20,12 +22,22 @@ def assert_no_secrets(data):
 
 
 def test_uptime_fix(originals):
-    wf = fixes.fix_uptime(originals["uptime"])
+    wf = fixes.fix_uptime(originals["uptime-monitor"])
     assert wf["name"] == "Uptime monitor (demo)"
     assert not wj.has_node(wf, "Send Email Alert1")
     interval = wj.node(wf, "Schedule Trigger")["parameters"]["rule"]["interval"][0]
     assert interval == {"field": "minutes", "minutesInterval": 30}
     assert "headerParameters" not in wj.node(wf, "Perform Site Test")["parameters"]
+    assert wj.node(wf, "For Each Site...")["parameters"]["batchSize"] == 1
+
+    calc = {
+        a["name"]: a["value"]
+        for a in wj.node(wf, "Calculate Status")["parameters"]["assignments"]["assignments"]
+    }
+    assert "$json.Status !== 'DOWN'" in calc["UP_FROM_UP"]
+    assert "$json.Status !== 'DOWN'" in calc["DOWN_FROM_UP"]
+    assert "$json.Status === 'DOWN'" in calc["UP_FROM_DOWN"]
+    assert "$json.Status === 'DOWN'" in calc["DOWN_FROM_DOWN"]
 
     for name, tab in (("Get Sites", "Sites"), ("Log Uptime Event", "Log"), ("Update Site Status", "Sites")):
         params = wj.node(wf, name)["parameters"]
@@ -40,6 +52,7 @@ def test_uptime_fix(originals):
     slack = wj.node(wf, "Send Chat Alert")
     assert slack["parameters"]["authentication"] == "accessToken"
     assert slack["parameters"]["channelId"]["value"] == "__VALUE:slack_channel__"
+    assert "'still DOWN' : 'back UP'" in slack["parameters"]["text"]
     assert sorted(wj.credential_slots(wf)) == sorted(
         [
             ("Get Sites", "googleSheetsOAuth2Api", "google"),
@@ -53,13 +66,14 @@ def test_uptime_fix(originals):
 
 
 def test_meegle_digest_fix(originals):
-    wf = fixes.fix_meegle_digest(originals["meegle"])
+    wf = fixes.fix_meegle_digest(originals["meegle-daily-digest"])
     assignments = {
         a["name"]: a["value"] for a in wj.node(wf, "Config")["parameters"]["assignments"]["assignments"]
     }
     assert "meegle_mcp_token" not in assignments
     assert assignments["delivery_mode"] == "slack"
-    assert assignments["slack_webhook_url"] == "__VALUE:slack_webhook_url__"
+    assert "slack_webhook_url" not in assignments
+    assert assignments["slack_channel"] == "__VALUE:slack_channel__"
     assert assignments["meegle_project_key"] == "__VALUE:meegle_project_key__"
 
     for name in fixes.MEEGLE_MCP_NODES:
@@ -68,11 +82,16 @@ def test_meegle_digest_fix(originals):
         assert params["authentication"] == "genericCredentialType"
         assert params["genericAuthType"] == "httpHeaderAuth"
 
-    assert wj.targets(wf, "Compose digest") == ["Done (log only)", "Has Slack webhook"]
-    assert wj.targets(wf, "Has Slack webhook") == ["POST to Slack webhook"]
-    assert wj.credential_slots(wf) == [
+    assert not wj.has_node(wf, "POST to Slack webhook")
+    assert wj.targets(wf, "Compose digest") == ["Done (log only)", "Has Slack channel"]
+    assert wj.targets(wf, "Has Slack channel") == ["Post digest to Slack"]
+    post = wj.node(wf, "Post digest to Slack")["parameters"]
+    assert post["authentication"] == "accessToken"
+    assert post["channelId"]["value"] == "__VALUE:slack_channel__"
+    assert sorted(wj.credential_slots(wf)) == [
         ("MCP: fetch bugs (issue)", "httpHeaderAuth", "meegle_mcp"),
         ("MCP: fetch stories", "httpHeaderAuth", "meegle_mcp"),
+        ("Post digest to Slack", "slackApi", "slack"),
     ]
     assert all(n["id"] == wj.new_node_id(wf["name"], n["name"]) for n in wf["nodes"])
     assert wf["settings"]["executionOrder"] == "v1"
@@ -80,7 +99,7 @@ def test_meegle_digest_fix(originals):
 
 
 def test_medium_digest_fix(originals):
-    wf = fixes.fix_medium_digest(originals["medium"])
+    wf = fixes.fix_medium_digest(originals["medium-digest"])
     code = wj.node(wf, "Extract article links")["parameters"]["jsCode"]
     assert ".slice(0, 5)" in code and ".slice(0, 100)" not in code
 
@@ -105,22 +124,31 @@ def test_medium_digest_fix(originals):
 
 
 def test_github_blueprint_fix(originals):
-    bp = fixes.fix_github_merge_blueprint(originals["github"])
+    bp = fixes.fix_github_merge_blueprint(originals["github-merge-slack"])
     flow = {m["id"]: m for m in bp["flow"]}
-    assert flow[2]["filter"]["conditions"] == [[{"a": "{{1.merged}}", "b": "true", "o": "boolean:equal"}]]
+    assert flow[2]["filter"]["conditions"] == [
+        [
+            {"a": "{{1.merged}}", "b": "true", "o": "boolean:equal"},
+            {"a": "{{1.mergedAt}}", "b": "{{addMinutes(now; -20)}}", "o": "date:greater"},
+        ]
+    ]
     assert all(m["parameters"].get("__IMTCONN__", None) is None for m in bp["flow"])
-    assert originals["github"]["flow"][0]["parameters"]["__IMTCONN__"] is not None  # original untouched
+    assert (
+        originals["github-merge-slack"]["flow"][0]["parameters"]["__IMTCONN__"] is not None
+    )  # original untouched
 
 
-def test_committed_templates_are_up_to_date(originals, load_json):
-    expected = {
-        "uptime-monitor/workflow.json": fixes.fix_uptime(originals["uptime"]),
-        "meegle-daily-digest/workflow.json": fixes.fix_meegle_digest(originals["meegle"]),
-        "medium-digest/workflow.json": fixes.fix_medium_digest(originals["medium"]),
-        "github-merge-slack/blueprint.json": fixes.fix_github_merge_blueprint(originals["github"]),
-    }
-    for rel, data in expected.items():
-        assert load_json(paths.CATALOG_DIR / rel) == data, f"{rel} is stale: run scripts/build_catalog.py"
+def test_committed_templates_are_up_to_date(load_json):
+    for target in targets():
+        assert load_json(target.output) == target.build(), (
+            f"{target.output} is stale: run scripts/build_catalog.py"
+        )
+
+
+def test_catalog_sources_match_build_targets():
+    catalog = load_catalog()
+    for target in targets():
+        assert catalog.workflow(target.workflow_id).source == str(target.source.relative_to(paths.REPO_ROOT))
 
 
 def test_catalog_has_no_secrets():

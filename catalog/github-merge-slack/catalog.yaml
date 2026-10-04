@@ -13,8 +13,9 @@ connectors:
   - id: make_slack
     purpose: Posts the diff to your channel.
 try_it: |
-  Merge a pull request in the repository you chose, then click **Run now** (Make also checks
-  every 15 minutes). The diff appears in your Slack channel, and the run shows below.
+  Merge a pull request in the repository you chose, then click **Run now** within 20 minutes
+  (Make also checks every 15 minutes). The diff appears in your Slack channel, and the run shows
+  below. Only pull requests merged in the last 20 minutes are posted, so nothing is posted twice.
 make:
   blueprint: blueprint.json
   setup_doc: make-setup.md

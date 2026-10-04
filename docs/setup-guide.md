@@ -23,7 +23,6 @@ oauth_config:
       - chat:write
       - chat:write.public
       - channels:read
-      - incoming-webhook
 settings:
   org_deploy_enabled: false
   socket_mode_enabled: false
@@ -97,7 +96,7 @@ Workspace can connect.
 1. Create an account at <https://app.nango.dev> (Pay-as-you-go plan for more than 10 connections).
 2. **Integrations → Configure new integration**:
    - **Slack** — integration ID `slack`; client ID/secret from §1; scopes
-     `chat:write,chat:write.public,channels:read,incoming-webhook`.
+     `chat:write,chat:write.public,channels:read`.
    - **Google** — integration ID `google`; client ID/secret from §3; scopes from §3.
 3. **Environment settings** → copy the secret key.
 

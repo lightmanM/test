@@ -41,7 +41,7 @@
               "id": "f0320678-d352-486f-a633-9980c4fc73b2",
               "name": "UP_FROM_UP",
               "type": "boolean",
-              "value": "={{ $json.statusCode < 400 && $json.Status === 'UP' }}"
+              "value": "={{ $json.statusCode < 400 && $json.Status !== 'DOWN' }}"
             },
             {
               "id": "61783eb6-a683-44c9-aa0c-5fc5247da9fa",
@@ -59,7 +59,7 @@
               "id": "9af72278-5b29-406a-b4c5-f47f3d805063",
               "name": "DOWN_FROM_UP",
               "type": "boolean",
-              "value": "={{ $json.statusCode >= 400 && $json.Status === 'UP' }}"
+              "value": "={{ $json.statusCode >= 400 && $json.Status !== 'DOWN' }}"
             }
           ]
         },
@@ -112,7 +112,7 @@
           "mode": "id",
           "value": "__VALUE:slack_channel__"
         },
-        "text": "=From: n8n uptime\nDate: {{ $('Calculate Status').item.json[\"date\"] }}\n\n{{ $('Calculate Status').item.json.Property }} is {{ $('Calculate Status').item.json[\"DOWN_FROM_UP\"] ? 'DOWN' : 'UP' }}",
+        "text": "=From: n8n uptime\nDate: {{ $('Calculate Status').item.json[\"date\"] }}\n\n{{ $('Calculate Status').item.json.Property }} is {{ $('Calculate Status').item.json.DOWN_FROM_UP ? 'DOWN' : ($('Calculate Status').item.json.DOWN_FROM_DOWN ? 'still DOWN' : 'back UP') }}",
         "otherOptions": {}
       },
       "id": "4b0cb0cc-282b-4be9-a4ca-0c4eb10d896e",
@@ -317,7 +317,7 @@
     },
     {
       "parameters": {
-        "batchSize": 100,
+        "batchSize": 1,
         "options": {}
       },
       "id": "22efcca8-81a8-4128-a03f-efd394e41977",

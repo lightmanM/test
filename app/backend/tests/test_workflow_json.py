@@ -71,3 +71,30 @@ def test_as_template_keeps_only_api_fields():
 def test_new_node_id_is_deterministic():
     assert wj.new_node_id("wf", "node") == wj.new_node_id("wf", "node")
     assert wj.new_node_id("wf", "node") != wj.new_node_id("wf", "other")
+
+
+def test_insert_between_keeps_source_output_and_target_input():
+    wf = make_wf()
+    wf["connections"]["A"] = {
+        "main": [[], [{"node": "B", "type": "main", "index": 1}]]
+    }  # false branch -> input 1
+    wj.insert_between(wf, "A", "B", {"name": "N", "type": "set", "parameters": {}})
+    assert wj.targets(wf, "A", output=0) == []
+    assert wj.targets(wf, "A", output=1) == ["N"]
+    assert wj.edges(wf, "N", "B") == [(0, {"node": "B", "type": "main", "index": 1})]
+
+
+def test_insert_between_requires_output_when_ambiguous():
+    wf = make_wf()
+    wj.connect(wf, "A", "B", output=1)
+    with pytest.raises(wj.WorkflowEditError, match="pass output"):
+        wj.insert_between(wf, "A", "B", {"name": "N", "type": "set", "parameters": {}})
+    wj.insert_between(wf, "A", "B", {"name": "N", "type": "set", "parameters": {}}, output=1)
+    assert wj.targets(wf, "A", output=0) == ["B"]
+    assert wj.targets(wf, "A", output=1) == ["N"]
+
+
+def test_strip_ids_removes_nested_ids():
+    from workflow_demo.catalog.build import strip_ids
+
+    assert strip_ids({"id": 1, "nodes": [{"id": 2, "name": "x"}]}) == {"nodes": [{"name": "x"}]}

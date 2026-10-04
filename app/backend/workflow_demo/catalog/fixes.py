@@ -31,12 +31,21 @@ def _require(condition: bool, message: str) -> None:
         raise wj.WorkflowEditError(message)
 
 
-def _set_assignment(set_node: wj.Node, name: str, new_value: Any) -> None:
+def _assignment(set_node: wj.Node, name: str) -> dict[str, Any]:
     for assignment in set_node["parameters"]["assignments"]["assignments"]:
         if assignment["name"] == name:
-            assignment["value"] = new_value
-            return
+            return assignment
     raise wj.WorkflowEditError(f"{set_node['name']!r} has no assignment {name!r}")
+
+
+def _set_assignment(set_node: wj.Node, name: str, new_value: Any) -> None:
+    _assignment(set_node, name)["value"] = new_value
+
+
+def _rename_assignment(set_node: wj.Node, old: str, new: str, new_value: Any) -> None:
+    assignment = _assignment(set_node, old)
+    assignment["name"] = new
+    assignment["value"] = new_value
 
 
 def _remove_assignment(set_node: wj.Node, name: str) -> None:
@@ -93,6 +102,25 @@ def fix_uptime(original: Workflow) -> Workflow:
     site_test.pop("sendHeaders", None)
     site_test.pop("headerParameters", None)
 
+    # The loop handed every site to the HTTP check and to a cross-join Merge at once, so with two
+    # or more sites each response was paired with each site (false alerts, conflicting status
+    # writes). Process one site per iteration.
+    loop = wj.node(wf, "For Each Site...")
+    _require(loop["type"] == "n8n-nodes-base.splitInBatches", "For Each Site... is not a loop node")
+    loop["parameters"]["batchSize"] = 1
+
+    # A blank Status cell (e.g. a newly added site) matched no route at all. Treat anything that
+    # isn't DOWN as UP.
+    calc = wj.node(wf, "Calculate Status")
+    for name in ("UP_FROM_UP", "DOWN_FROM_UP"):
+        assignment = _assignment(calc, name)
+        assignment["value"] = _replace_once(
+            assignment["value"],
+            "$json.Status === 'UP'",
+            "$json.Status !== 'DOWN'",
+            f"Calculate Status {name}",
+        )
+
     # All sheet nodes use the spreadsheet created for the user at deploy time, addressed by tab name.
     for name, tab in (
         ("Get Sites", UPTIME_SITES_TAB),
@@ -128,6 +156,14 @@ def fix_uptime(original: Workflow) -> Workflow:
     }
 
     slack = wj.node(wf, "Send Chat Alert")
+    # Alerts also fire for DOWN_FROM_DOWN and UP_FROM_DOWN; the text only knew DOWN_FROM_UP and
+    # called a site that's still down "UP".
+    slack["parameters"]["text"] = _replace_once(
+        slack["parameters"]["text"],
+        """{{ $('Calculate Status').item.json["DOWN_FROM_UP"] ? 'DOWN' : 'UP' }}""",
+        f"{{{{ {status}.DOWN_FROM_UP ? 'DOWN' : ({status}.DOWN_FROM_DOWN ? 'still DOWN' : 'back UP') }}}}",
+        "Send Chat Alert text",
+    )
     slack["parameters"]["authentication"] = "accessToken"
     slack["parameters"]["channelId"] = {"__rl": True, "mode": "id", "value": value("slack_channel")}
     wj.set_credential_slot(slack, "slackApi", "slack")
@@ -150,7 +186,9 @@ def fix_meegle_digest(compiled: Workflow) -> Workflow:
     # The token must never live in node parameters: it moves to an n8n Header Auth credential.
     _remove_assignment(config, "meegle_mcp_token")
     _set_assignment(config, "delivery_mode", "slack")
-    _set_assignment(config, "slack_webhook_url", value("slack_webhook_url"))
+    # The incoming-webhook URL is itself a secret and would sit in node parameters and execution
+    # data. Post with the Slack bot token (a credential) to a chosen channel instead.
+    _rename_assignment(config, "slack_webhook_url", "slack_channel", value("slack_channel"))
     _set_assignment(config, "window_hours", value("window_hours"))
     _set_assignment(config, "meegle_project_key", value("meegle_project_key"))
     _set_assignment(config, "meegle_simple_name", value("meegle_simple_name"))
@@ -165,10 +203,36 @@ def fix_meegle_digest(compiled: Workflow) -> Workflow:
         http["parameters"]["genericAuthType"] = "httpHeaderAuth"
         wj.set_credential_slot(http, "httpHeaderAuth", "meegle_mcp")
 
-    # Only post to Slack when a webhook URL is configured.
+    old_post = wj.node(wf, "POST to Slack webhook")
+    _require(
+        wj.targets(wf, "Compose digest") == ["POST to Slack webhook", "Done (log only)"],
+        "digest tail changed",
+    )
+    wj.remove_node(wf, "POST to Slack webhook")
+    post = wj.add_node(
+        wf,
+        {
+            "name": "Post digest to Slack",
+            "type": "n8n-nodes-base.slack",
+            "typeVersion": 2.3,
+            "position": old_post["position"],
+            "parameters": {
+                "authentication": "accessToken",
+                "resource": "message",
+                "operation": "post",
+                "select": "channel",
+                "channelId": {"__rl": True, "mode": "id", "value": value("slack_channel")},
+                "text": "={{ $json.text }}",
+                "otherOptions": {"mrkdwn": True, "unfurl_links": False, "unfurl_media": False},
+            },
+        },
+    )
+    wj.set_credential_slot(post, "slackApi", "slack")
+
+    # Only post when a channel is configured (the original posted even with no destination set).
     compose = wj.node(wf, "Compose digest")
-    has_webhook = {
-        "name": "Has Slack webhook",
+    has_channel = {
+        "name": "Has Slack channel",
         "type": "n8n-nodes-base.if",
         "typeVersion": 2.2,
         "position": wj.position_near(compose, dx=100, dy=-150),
@@ -177,8 +241,8 @@ def fix_meegle_digest(compiled: Workflow) -> Workflow:
                 "options": {"caseSensitive": True, "leftValue": "", "typeValidation": "strict", "version": 2},
                 "conditions": [
                     {
-                        "id": "has-slack-webhook",
-                        "leftValue": "={{ $json.slack_webhook_url }}",
+                        "id": "has-slack-channel",
+                        "leftValue": "={{ $('Config').first().json.slack_channel }}",
                         "rightValue": "",
                         "operator": {"type": "string", "operation": "notEmpty", "singleValue": True},
                     }
@@ -188,7 +252,9 @@ def fix_meegle_digest(compiled: Workflow) -> Workflow:
             "options": {},
         },
     }
-    wj.insert_between(wf, "Compose digest", "POST to Slack webhook", has_webhook)
+    wj.add_node(wf, has_channel)
+    wj.connect(wf, "Compose digest", "Has Slack channel")
+    wj.connect(wf, "Has Slack channel", "Post digest to Slack")
 
     _renumber_node_ids(wf)
     return wf
@@ -200,6 +266,9 @@ MEDIUM_MAX_ARTICLES = 5
 MEDIUM_READER_TIMEOUT_MS = 45_000
 MEDIUM_READER_NODE_TIMEOUT_MS = 60_000
 MEDIUM_LLM_TIMEOUT_MS = 60_000
+# Articles are processed one after another, so a run takes roughly 5 x (fetch + LLM). Typical runs
+# take 1-3 minutes; a worst case (every call hitting its timeout) can exceed n8n Cloud Starter's
+# 5-minute limit, which is why the Pro plan (40 minutes) is recommended.
 
 
 def fix_medium_digest(original: Workflow) -> Workflow:
@@ -212,7 +281,7 @@ def fix_medium_digest(original: Workflow) -> Workflow:
     _set_assignment(config, "llmModel", value("llm_model"))
     _set_assignment(config, "slackChannel", value("slack_channel"))
 
-    # Cap the run so it fits n8n Cloud's execution time limit.
+    # Cap the run length (see MEDIUM_* above).
     extract = wj.node(wf, "Extract article links")
     extract["parameters"]["jsCode"] = _replace_once(
         extract["parameters"]["jsCode"],
@@ -249,12 +318,16 @@ def fix_medium_digest(original: Workflow) -> Workflow:
 
 # ------------------------------------------------------------------------ github merge (Make)
 
+MAKE_MERGE_WINDOW_MINUTES = 20  # > the 15-minute polling interval
+
 
 def fix_github_merge_blueprint(original: Workflow) -> Workflow:
     """Make blueprint "GitHub 合并提交 Diff 通知前端", prepared for a Make Bridge template.
 
-    Adds a merged-only filter in front of the commit lookup (unmerged PR updates have no
-    merge commit and made the scenario error) and removes the owner's connection IDs.
+    Adds a filter in front of the commit lookup: only PRs that are merged (unmerged PR updates
+    have no merge commit and made the scenario error) and were merged within the last
+    MAKE_MERGE_WINDOW_MINUTES (the trigger watches *updated* PRs, so later activity on an old
+    merged PR would otherwise post its diff again). Also removes the owner's connection IDs.
     Repo and channel stay as sample values; they become end-user inputs in the Bridge
     template (see catalog/github-merge-slack/make-setup.md).
     """
@@ -264,8 +337,17 @@ def fix_github_merge_blueprint(original: Workflow) -> Workflow:
     _require(modules.get(1, {}).get("module") == "github:newPullRequest", "module 1 is not the PR trigger")
     _require(modules.get(2, {}).get("module") == "github:makeRestApiCall", "module 2 is not the API call")
     modules[2]["filter"] = {
-        "name": "Merged pull requests only",
-        "conditions": [[{"a": "{{1.merged}}", "b": "true", "o": "boolean:equal"}]],
+        "name": "Recently merged pull requests only",
+        "conditions": [
+            [
+                {"a": "{{1.merged}}", "b": "true", "o": "boolean:equal"},
+                {
+                    "a": "{{1.mergedAt}}",
+                    "b": f"{{{{addMinutes(now; -{MAKE_MERGE_WINDOW_MINUTES})}}}}",
+                    "o": "date:greater",
+                },
+            ]
+        ],
     }
     for module in bp["flow"]:
         if "__IMTCONN__" in module.get("parameters", {}):

@@ -12,8 +12,11 @@ connectors:
   - id: meegle_mcp_token
     purpose: Reads work items from your Meegle space.
   - id: slack
-    purpose: The channel you pick when approving Slack receives the report.
+    purpose: Posts the report to the channel you choose.
 settings:
+  - key: slack_channel
+    label: Slack channel for the report
+    type: slack_channel
   - key: meegle_project_key
     label: Meegle project key
     type: string
@@ -29,16 +32,17 @@ settings:
     default: 24
     help: Hours of history to include. Use 720 (30 days) if your space is quiet.
 try_it: |
-  Click **Run now**. The report appears in the Slack channel you picked when connecting Slack,
-  and its text is shown below under Results.
+  Click **Run now**. The report appears in your Slack channel, and its text is shown below under
+  Results.
 n8n:
   template: workflow.json
   values:
-    slack_webhook_url: connection
+    slack_channel: setting
     window_hours: setting
     meegle_project_key: setting
     meegle_simple_name: setting
   credentials:
     meegle_mcp: {type: httpHeaderAuth, source: connection, ref: meegle_mcp_token}
+    slack: {type: slackApi, source: connection, ref: slack}
   result_nodes:
     - Compose digest

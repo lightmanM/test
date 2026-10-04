@@ -219,13 +219,18 @@
         ]
       },
       "filter": {
-        "name": "Merged pull requests only",
+        "name": "Recently merged pull requests only",
         "conditions": [
           [
             {
               "a": "{{1.merged}}",
               "b": "true",
               "o": "boolean:equal"
+            },
+            {
+              "a": "{{1.mergedAt}}",
+              "b": "{{addMinutes(now; -20)}}",
+              "o": "date:greater"
             }
           ]
         ]

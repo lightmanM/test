@@ -67,7 +67,7 @@ a "Run now" trigger.
 - **What it does**: every 30 min, reads sites from a Google Sheet, checks each, logs results, alerts Slack when a site goes down / stays down / recovers.
 - **Connectors**: Google (Nango; Sheets) · Slack (Nango; bot token).
 - **User settings**: Slack channel (picker); sites to monitor (default: `https://example.com` and one always-failing URL so the alert path is visible).
-- **Template fixes**: remove unconnected Gmail node; rewrite "Update Site Status" to update the `Sites` tab row matched by `Property` with `Status = UP/DOWN`; schedule 1 min → 30 min; Slack node auth → access token (`slackApi`); resource locators switched to ID mode (no Drive listing needed).
+- **Template fixes**: remove unconnected Gmail node; rewrite "Update Site Status" to update the `Sites` tab row matched by `Property` with `Status = UP/DOWN`; loop processes one site at a time (the cross-join Merge paired every response with every site); blank Status treated as UP; alert text says DOWN / still DOWN / back UP; schedule 1 min → 30 min; Slack node auth → access token (`slackApi`); resource locators switched to ID mode (no Drive listing needed).
 - **Deploy job**:
   1. Get the user's Google token from Nango; create spreadsheet "Uptime monitor (demo)" in the user's Drive with tabs `Sites` (Property, Status), `Log` (date, Property, UP_FROM_UP, DOWN_FROM_DOWN, UP_FROM_DOWN, DOWN_FROM_UP) and seed the sites.
   2. n8n credentials: `googleSheetsOAuth2Api` (our Google client ID/secret + Nango tokens — n8n refreshes Google tokens itself), `slackApi` (bot token), `httpHeaderAuth` for the Run-now webhook.
@@ -78,11 +78,11 @@ a "Run now" trigger.
 ### 3.2 `meegle-daily-digest` (n8n) — from `meegle-daily-digest/`
 
 - **What it does**: weekdays 09:00 (plus on demand), pulls bugs and stories from Meegle via its MCP server, aggregates them, posts a Chinese daily report.
-- **Connectors**: Meegle MCP token (text box, encrypted in our DB) · Slack incoming webhook (Nango Slack connection with `incoming-webhook` scope; the user picks the channel in Slack's approval screen; URL read from the connection's raw OAuth response).
-- **User settings**: Meegle project key, Meegle simple name, look-back window (default 24 h; 720 h option for richer demo data).
+- **Connectors**: Meegle MCP token (text box, encrypted in our DB) · Slack (Nango; bot token).
+- **User settings**: Slack channel, Meegle project key, Meegle simple name, look-back window (default 24 h; 720 h option for richer demo data).
 - **Template**: compiled from the team's n8n Workflow-SDK code to n8n JSON by `scripts/compile_n8n_sdk.mjs` (verified with `@n8n/workflow-sdk` 0.34.2), committed as `catalog/meegle-daily-digest/workflow.json`.
-- **Template fixes**: token removed from the Config node; both MCP HTTP nodes authenticate with an `httpHeaderAuth` credential (`X-Mcp-Token`); an IF node posts to Slack only when the webhook URL is set.
-- **Deploy job**: credentials (`httpHeaderAuth` for Meegle; webhook auth) → inject Config values → create → publish.
+- **Template fixes**: token removed from the Config node; both MCP HTTP nodes authenticate with an `httpHeaderAuth` credential (`X-Mcp-Token`); the incoming-webhook post is replaced by a Slack node using the bot token (a webhook URL is a secret and would sit in node parameters); an IF node posts only when a channel is set.
+- **Deploy job**: credentials (`httpHeaderAuth` for Meegle, `slackApi`, webhook auth) → inject Config values → create → publish.
 - **Try it / results**: Run now → report in Slack; demo shows the report text (output of "Compose digest").
 
 ### 3.3 `medium-digest` (n8n) — from `medium-digest-project/`
@@ -91,7 +91,7 @@ a "Run now" trigger.
 - **Connectors**: Google (Nango; Gmail read-only) · Slack (Nango; bot token + channel).
 - **Shared (owner-provided)**: OpenAI-compatible API key → one shared n8n `openAiApi` credential; reader service URL + token → one shared n8n `httpHeaderAuth` credential.
 - **User settings**: Slack channel; (optional) model, default `gpt-4o-mini`.
-- **Template fixes**: cap to 5 newest articles (`.slice(0, 100)` → `.slice(0, 5)` in "Extract article links"); reader HTTP node sends `Authorization: Bearer <token>` via credential; HTTP timeouts tuned so 5 articles fit n8n Cloud's run limit; Run-now webhook added.
+- **Template fixes**: cap to 5 newest articles (`.slice(0, 100)` → `.slice(0, 5)` in "Extract article links"); reader HTTP node sends `Authorization: Bearer <token>` via credential; shorter HTTP timeouts (reader 60 s, LLM 60 s). Typical runs take 1–3 min, but a worst case can exceed Starter's 5-min limit → Pro recommended. Run-now webhook added.
 - **Deploy job**: credentials (`gmailOAuth2`, `slackApi`; shared ones reused) → inject config (reader URL, channel, model) → create → publish.
 - **Try it / results**: Run now → weekly report in Slack (or an "empty report" if the inbox has no Medium mail); demo shows report text (output of "Build Medium weekly report").
 
@@ -100,7 +100,7 @@ a "Run now" trigger.
 - **What it does**: watches a GitHub repo for merged pull requests, fetches the merge commit diff, posts it to Slack.
 - **Connectors**: GitHub + Slack, connected **inside Make's popup** (Make holds those tokens).
 - **User settings** (entered in the Bridge wizard): repo owner, repo name, Slack channel.
-- **One-time setup in Make** (done during implementation with the owner's account): add a "merged = true" filter between the trigger and the API call; turn hard-coded repo/channel into template inputs; trigger starts "from now on"; schedule every 15 min; save as a **Bridge template**; create Bridge app key (key ID + secret).
+- **One-time setup in Make** (done during implementation with the owner's account): add a filter between the trigger and the API call (merged = true **and** merged within the last 20 min, so later updates to an old merged PR don't re-post); turn hard-coded repo/channel into template inputs; trigger starts "from now on"; schedule every 15 min; save as a **Bridge template**; create Bridge app key (key ID + secret).
 - **Availability check**: at startup / in admin setup check, call the Bridge API; if Bridge isn't enabled → card shows "Deploy unavailable".
 - **Deploy flow** (Bridge portal API at `https://us2.make.com/portal/api/bridge/...`, each call authorized with a 2-minute JWT `{sub: <username>, jti}` signed with the Bridge secret — per-user sandbox):
   1. `POST /integrations/init/{templateId}` with `redirectUri`, `prefill`, `allowReusingComponents: true`, scenario name → `publicUrl`, `flow.id`.
@@ -189,7 +189,7 @@ Shared n8n credentials (`openAiApi`, reader `httpHeaderAuth`) are created once b
 
 All adapters implement: `check_available()`, `deploy(ctx)`, `undeploy(ctx)`, `run_now(ctx)`, `recent_runs(ctx)`. A **fake adapter** set (`DEMO_FAKE_PLATFORMS=1`) makes the whole UI work without any credentials — used for development until real keys arrive and for E2E tests.
 
-**Nango**: connect sessions; verify connection tags; fetch fresh credentials (`GET /connections/{id}?provider_config_key=…`); Slack raw response for `authed_user.id` and `incoming_webhook.url`. Integrations: `slack` (scopes `chat:write chat:write.public channels:read incoming-webhook`), `google` (scopes Sheets, Drive file, Gmail read-only, email).
+**Nango**: connect sessions; verify connection tags; fetch fresh credentials (`GET /connections/{id}?provider_config_key=…`); Slack raw response for `authed_user.id`. Integrations: `slack` (scopes `chat:write chat:write.public channels:read`), `google` (scopes Sheets, Drive file, Gmail read-only, email).
 
 **n8n** (`X-N8N-API-KEY`):
 - `GET /credentials/schema/{type}` at startup to validate payloads; `POST /credentials`; `DELETE /credentials/{id}`.
@@ -289,7 +289,7 @@ P0–P6 need no credentials (fake mode + mocked APIs). P7 starts when the owner 
 | Risk | Handling |
 |---|---|
 | Make Bridge not enabled on the owner's account | Card shows "Deploy unavailable" (agreed) |
-| n8n Starter stops runs after 5 min (Pro: 40 min) | Medium digest capped at 5 articles with tuned timeouts; Pro plan recommended |
+| n8n Starter stops runs after 5 min (Pro: 40 min) | Medium digest capped at 5 articles with shorter timeouts (typical run 1–3 min); worst case can still exceed 5 min → Pro plan recommended |
 | n8n version differences (publish vs activate) | Detect and fall back |
 | Freedium mirror changes/blocks requests; Medium terms | Kept by owner decision; per-article failures are already handled by the workflow |
 | Chromium in Modal containers | Verify memory/shared-memory flags during P4 |
@@ -302,7 +302,7 @@ P0–P6 need no credentials (fake mode + mocked APIs). P7 starts when the owner 
 
 ## 15. Needed from the owner at go-live (P7)
 
-1. Demo Slack app for the Connect popup (scopes in §8) and the bot app (Socket Mode; not running elsewhere).
+1. Demo Slack app for the Connect popup (scopes in §8) and the bot app (Socket Mode; not running elsewhere) — manifests in `docs/setup-guide.md`.
 2. Google Cloud **Internal** OAuth client (Web) — setup guide provided.
 3. Nango account (Pay-as-you-go) + secret key.
 4. Make API token, team ID, Bridge key ID + secret (and Bridge enabled).

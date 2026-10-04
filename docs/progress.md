@@ -11,7 +11,7 @@ Living document. Update at the end of every work session and every PR.
 
 | Phase | PR | Status | Notes |
 |---|---|---|---|
-| P0 Foundations | (pending) | in review | repo layout, tooling, CI, catalog + fixed templates, SDK compile, setup guide |
+| P0 Foundations | [#1](https://github.com/lightmanM/test/pull/1) | in review | repo layout, tooling, CI, catalog + fixed templates, SDK compile, setup guide |
 | P1a Backend core | — | not started | auth, DB, catalog API, state machine, fake adapters |
 | P1b Frontend | — | not started | sign-in, catalog, workflow page, admin shell |
 | P2 Connections | — | not started | Nango connect + manual secrets |
@@ -28,6 +28,11 @@ Notes: backend package `app/backend/workflow_demo` (catalog models/loader, templ
 `scripts/build_catalog.py [--check]` regenerates `catalog/*/workflow.json` + `blueprint.json` from
 `demo-project/`; CI (`.github/workflows/ci.yml`) runs ruff, pytest and the template check. Frontend
 tooling moves to P1b; `services/` and `deploy/` folders are created in P4/P7.
+Review fixes (self-review, high): uptime loop one site per batch (cross-join Merge), blank Status = UP,
+alert text DOWN/still DOWN/back UP; Meegle digest posts with the Slack bot token + channel instead of an
+incoming-webhook URL (secret in node params) — `incoming-webhook` scope dropped; Make filter also requires
+merged within 20 min (trigger watches *updated* PRs); `insert_between` keeps output/input indexes; build
+targets in one place (`catalog/build.py`); CI recompiles the Meegle SDK source to catch drift.
 - [x] Repo layout (`app/`, `catalog/`, `services/`, `deploy/`, `scripts/`) and tooling (ruff, pytest, Vite, TypeScript)
 - [x] `catalog/*/catalog.yaml` for all 5 workflows (connectors, settings schema, how to try, result source)
 - [x] `scripts/compile_n8n_sdk.mjs` → `catalog/meegle-daily-digest/workflow.json`

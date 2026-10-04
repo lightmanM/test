@@ -40,8 +40,8 @@
             },
             {
               "id": "a3",
-              "name": "slack_webhook_url",
-              "value": "__VALUE:slack_webhook_url__",
+              "name": "slack_channel",
+              "value": "__VALUE:slack_channel__",
               "type": "string"
             },
             {
@@ -200,24 +200,6 @@
       }
     },
     {
-      "id": "9d6e6a14-6016-5b7a-8094-26cb7ff9158f",
-      "name": "POST to Slack webhook",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        1500,
-        300
-      ],
-      "parameters": {
-        "method": "POST",
-        "url": "={{ $json.slack_webhook_url }}",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ text: $json.text }) }}",
-        "options": {}
-      }
-    },
-    {
       "id": "997d8fa8-5aaa-52ac-be0d-2fd96e0f75b4",
       "name": "Done (log only)",
       "type": "n8n-nodes-base.code",
@@ -231,7 +213,40 @@
       }
     },
     {
-      "name": "Has Slack webhook",
+      "name": "Post digest to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        1500,
+        300
+      ],
+      "parameters": {
+        "authentication": "accessToken",
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "__VALUE:slack_channel__"
+        },
+        "text": "={{ $json.text }}",
+        "otherOptions": {
+          "mrkdwn": true,
+          "unfurl_links": false,
+          "unfurl_media": false
+        }
+      },
+      "credentials": {
+        "slackApi": {
+          "id": "slot:slack",
+          "name": "slack"
+        }
+      },
+      "id": "057f0a5c-29ef-52dc-8cec-6327343ab642"
+    },
+    {
+      "name": "Has Slack channel",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
@@ -248,8 +263,8 @@
           },
           "conditions": [
             {
-              "id": "has-slack-webhook",
-              "leftValue": "={{ $json.slack_webhook_url }}",
+              "id": "has-slack-channel",
+              "leftValue": "={{ $('Config').first().json.slack_channel }}",
               "rightValue": "",
               "operator": {
                 "type": "string",
@@ -262,7 +277,7 @@
         },
         "options": {}
       },
-      "id": "5652e843-7901-511f-b5cb-441bde8c419e"
+      "id": "50c0d41b-25f0-5774-a00e-7bf86975884d"
     }
   ],
   "connections": {
@@ -352,18 +367,18 @@
             "index": 0
           },
           {
-            "node": "Has Slack webhook",
+            "node": "Has Slack channel",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Has Slack webhook": {
+    "Has Slack channel": {
       "main": [
         [
           {
-            "node": "POST to Slack webhook",
+            "node": "Post digest to Slack",
             "type": "main",
             "index": 0
           }

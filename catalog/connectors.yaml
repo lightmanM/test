@@ -4,8 +4,8 @@ slack:
   kind: nango
   integration: slack
   description: >-
-    Your Slack workspace. Gives the demo a bot token to post messages, the incoming-webhook
-    channel you pick while approving, and your Slack user ID.
+    Your Slack workspace. Gives the demo a bot token to post to the channels you choose, and
+    your Slack user ID.
 
 google:
   name: Google (Sheets and Gmail)

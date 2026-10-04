@@ -1,4 +1,9 @@
-"""Filesystem locations shared by the backend and the build scripts."""
+"""Filesystem locations shared by the backend and the build scripts.
+
+Defaults assume a source checkout (``pip install -e app/backend``). A deployed image that installs
+the package normally must set ``WORKFLOW_DEMO_CATALOG_DIR`` (and ``WORKFLOW_DEMO_REPO_ROOT`` if it
+also ships ``demo-project/``).
+"""
 
 import os
 from pathlib import Path
