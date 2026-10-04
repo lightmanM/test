@@ -150,6 +150,11 @@ def test_popup_link_from_an_earlier_deploy_is_rejected(queued):
     page = client.get(f"/make/callback?state={old_state}")
     assert page.status_code == 400 and "earlier deploy" in page.text
     assert client.get(f"/make/callback?state={new_state}").status_code == 200
+    # The callback answers at once; a job finishes the deploy. A repeated redirect is harmless.
+    assert deployment(svc).status == "deploying"
+    assert client.get(f"/make/callback?state={new_state}").status_code == 200
+    assert len(svc.runner.queued) == 1
+    svc.runner.drain()
     assert deployment(svc).status == "active"
     assert "user_step_nonce" not in deployment(svc).platform_refs
 

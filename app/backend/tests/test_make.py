@@ -19,6 +19,7 @@ from workflow_demo.make_bridge import sign_jwt
 BRIDGE = "https://us2.make.com/portal/api/bridge"
 CATALOG = load_catalog()
 CALLBACK = "http://testserver/make/callback?state=signed-state"
+NAME = "[demo] GitHub merge → Slack · alice"
 
 
 def b64decode(part):
@@ -149,8 +150,24 @@ def test_finish_waits_for_make_then_activates(adapter):
         return_value=httpx.Response(200, json={"integration": {"scenarioId": 101}})
     )
     stray = respx.delete(f"{BRIDGE}/integrations/102").mock(return_value=httpx.Response(200, json={}))
+    # A scenario left by an abandoned earlier popup (same name) is removed; others are kept.
+    respx.get(f"{BRIDGE}/integrations/").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "integrations": [
+                    {"scenario": {"id": 101, "name": NAME}},
+                    {"scenario": {"id": 90, "name": NAME}},
+                    {"scenario": {"id": 91, "name": "[demo] Something else · alice"}},
+                ]
+            },
+        )
+    )
+    old_popup = respx.delete(f"{BRIDGE}/integrations/90").mock(return_value=httpx.Response(200, json={}))
+    kept = respx.delete(f"{BRIDGE}/integrations/91")
     result = adapter.finish_user_step(context({"popup_url": "u", "flow_id": "f-1"}), {})
     assert check.call_count == 2 and activated.called and stray.called
+    assert old_popup.called and not kept.called
     assert result.status == "active" and result.refs == {"flow_id": "f-1", "scenario_id": 101}
 
 
@@ -183,6 +200,7 @@ def test_finish_errors(adapter):
 
 @respx.mock
 def test_undeploy(adapter):
+    respx.get(f"{BRIDGE}/integrations/").mock(return_value=httpx.Response(200, json={"integrations": []}))
     deactivated = respx.post(f"{BRIDGE}/integrations/101/deactivate").mock(
         return_value=httpx.Response(200, json={})
     )
@@ -302,7 +320,7 @@ def test_popup_flow_through_the_api(real):
         return_value=httpx.Response(200, json={"integration": {"scenarioId": 555}})
     )
     page = client.get("/make/callback", params={"state": state, "flowId": "f-9"})
-    assert page.status_code == 200 and "All set" in page.text
+    assert page.status_code == 200 and "Almost done" in page.text
     dep = client.get("/api/workflows/github-merge-slack").json()["deployment"]
     assert dep["status"] == "active" and dep["popup_url"] is None
 
@@ -310,3 +328,58 @@ def test_popup_flow_through_the_api(real):
     deleted = respx.delete(f"{BRIDGE}/integrations/555").mock(return_value=httpx.Response(200, json={}))
     assert client.delete("/api/deployments/github-merge-slack").status_code == 202
     assert deleted.called
+
+
+@respx.mock
+def test_finish_retries_transient_errors(adapter):
+    respx.get(f"{BRIDGE}/integrations/check-init/f-1").mock(
+        side_effect=[httpx.Response(502, text="bad gateway"), httpx.Response(200, json=flow())]
+    )
+    respx.post(f"{BRIDGE}/integrations/101/activate").mock(return_value=httpx.Response(200, json={}))
+    respx.get(f"{BRIDGE}/integrations/").mock(return_value=httpx.Response(200, json={"integrations": []}))
+    assert adapter.finish_user_step(context({"flow_id": "f-1"}), {}).refs["scenario_id"] == 101
+
+    respx.get(f"{BRIDGE}/integrations/check-init/f-1").mock(
+        return_value=httpx.Response(400, json={"message": "bad flow"})
+    )
+    with pytest.raises(AdapterError, match="bad flow"):
+        adapter.finish_user_step(context({"flow_id": "f-1"}), {})
+
+
+@respx.mock
+def test_rejected_key_is_reported_and_rechecked_soon(adapter):
+    respx.get(f"{BRIDGE}/integrations/").mock(
+        return_value=httpx.Response(401, json={"message": "invalid token"})
+    )
+    availability = adapter.check_available()
+    assert "MAKE_BRIDGE_SECRET" in availability.reason
+    assert adapter._availability[0] - make_module.time.monotonic() <= make_module.RETRY_TTL
+
+
+def test_empty_env_values_count_as_unset(make_settings, monkeypatch):
+    monkeypatch.setenv("MAKE_BRIDGE_TEMPLATE_ID", "")
+    monkeypatch.setenv("MAKE_TEAM_ID", "")
+    settings = make_settings()
+    assert settings.make_bridge_template_id is None and settings.make_team_id is None
+
+
+@respx.mock
+def test_only_finished_executions_are_runs(adapter):
+    respx.get(f"{BRIDGE}/scenarios/101/logs").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "scenarioLogs": [
+                    {"id": "ex-1", "eventType": "EXECUTION_START", "timestamp": "2026-10-04T06:00:00Z"},
+                    {
+                        "id": "ex-1",
+                        "eventType": "EXECUTION_END",
+                        "status": 1,
+                        "timestamp": "2026-10-04T06:00:00Z",
+                    },
+                ]
+            },
+        )
+    )
+    runs = adapter.recent_runs(context({"scenario_id": 101}))
+    assert [(r.id, r.status) for r in runs] == [("ex-1", "success")]

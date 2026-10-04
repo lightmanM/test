@@ -22,7 +22,10 @@ TRANSITIONS: dict[Status | None, frozenset[Status]] = {
     Status.STOPPED: frozenset({Status.DEPLOYING}),
     Status.DEPLOYING: frozenset({Status.ACTIVE, Status.AWAITING_USER, Status.FAILED}),
     Status.REDEPLOYING: frozenset({Status.ACTIVE, Status.AWAITING_USER, Status.FAILED}),
-    Status.AWAITING_USER: frozenset({Status.ACTIVE, Status.FAILED, Status.REDEPLOYING, Status.STOPPING}),
+    # DEPLOYING: the user finished the popup and a job completes the deploy on the platform.
+    Status.AWAITING_USER: frozenset(
+        {Status.DEPLOYING, Status.ACTIVE, Status.FAILED, Status.REDEPLOYING, Status.STOPPING}
+    ),
     Status.ACTIVE: frozenset({Status.REDEPLOYING, Status.STOPPING}),
     Status.FAILED: frozenset({Status.REDEPLOYING, Status.STOPPING}),
     Status.STOPPING: frozenset({Status.STOPPED, Status.FAILED}),

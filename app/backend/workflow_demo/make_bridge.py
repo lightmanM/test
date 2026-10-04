@@ -73,12 +73,17 @@ class BridgeClient:
         except ValueError:
             raise BridgeError("Make returned a response that isn't JSON") from None
 
-    def integrations(self, subject: str, *, timeout: float = 30) -> list[dict[str, Any]]:
-        data = self._request("GET", "/integrations/", subject, timeout=timeout)
-        items = data.get("integrations") if isinstance(data, dict) else None
+    def ping(self, subject: str, *, timeout: float = 30) -> None:
+        """Any successful answer from the Bridge API (used as the availability check)."""
+        self._request("GET", "/integrations/", subject, timeout=timeout)
+
+    def integrations(self, subject: str) -> list[dict[str, Any]]:
+        """The end user's integrations (``{"integrations": [{"scenario": {...}}, ...]}``)."""
+        data = self._request("GET", "/integrations/", subject)
+        items = data.get("integrations") if isinstance(data, dict) else data
         if not isinstance(items, list):
             raise BridgeError("Make returned an unexpected integration list")
-        return items
+        return [item for item in items if isinstance(item, dict)]
 
     def init(self, subject: str, template_id: int, redirect_uri: str, scenario_name: str) -> tuple[str, str]:
         """Start an integration; returns ``(public_url, flow_id)``. The user finishes it in Make's popup."""

@@ -131,12 +131,15 @@ optional `SLACK_BOT_TEAM_ID` workspace check; card history kept on redeploy). Th
 Notes: `make_bridge.py` (portal API client; HS256 JWT per request built with the stdlib — `kid` = key ID, `sub` =
 `workflow-demo:<username>`, 2-minute expiry, random `jti`; optional `teamId`), `adapters/make.py`
 (`MakeBridgeAdapter`). Deploy: `init` with `redirectUri` = the signed `/make/callback?state=…` → `awaiting_user` with
-Make's `publicUrl` (the existing popup handling opens it) → callback → `check-init` (retried briefly while Make
-finishes) → activate the scenario (extra scenarios deleted; on failure everything created is deleted). Undeploy:
-deactivate + delete; if the callback never arrived, the flow is checked and any created scenario removed. Run now:
-`/integrations/{id}/run`; results from `/scenarios/{id}/logs` (status 1 ok, 2 warnings, 3 error; duration →
-finish time; non-execution events skipped). Availability: missing settings → "Not set up…"; `GET /integrations/`
-401/403/404 → "Deploy unavailable: Make Bridge isn't enabled…"; cached 10 min (1 min when unreachable).
+Make's `publicUrl` (the existing popup handling opens it) → callback claims `awaiting_user → deploying` (a repeated
+redirect is a no-op) and queues a `finish` job, so the popup page answers at once → the job polls `check-init` for
+up to ~2 min (transient errors retried) → activates the scenario (extra scenarios and same-named leftovers from
+abandoned popups deleted; on failure everything created is deleted). Undeploy: deactivate + delete; if the callback
+never arrived, the flow is checked; same-named leftovers are removed too. Run now: `/integrations/{id}/run`; results
+from `/scenarios/{id}/logs` (only entries with status 1 ok / 2 warnings / 3 error). Availability (single-flight,
+any 2xx = available): missing settings → "Not set up…"; 401 → "Make rejected the demo's Bridge key…" (rechecked
+after 1 min); 403/404 → "Make Bridge isn't enabled…" (10 min); unreachable → rechecked after 1 min. Settings now
+treat empty env values as unset (`env_ignore_empty`), so `.env.example` copies cleanly.
 - [x] Bridge client (JWT per request), availability check → "unavailable"
 - [x] init → popup → `/make/callback` → check-init → activate; run; logs; delete
 - [x] `catalog/github-merge-slack/make-setup.md` (JWT details, redirect URL, settings)
@@ -171,7 +174,7 @@ finish time; non-execution events skipped). Availability: missing settings → "
 | 2026-10-04 | Leaked Meegle token removed from git history (2 commits rewritten; `main` now at e7c40dc). Owner to revoke the token in Meegle. |
 
 ## Session log
-- 2026-10-04: PR #6 (P4) merged. P5 implemented: 139 backend tests (Bridge client + adapter contract, API popup flow).
+- 2026-10-04: PR #6 (P4) merged. P5 implemented and reviewed (10 findings fixed): 143 backend tests (Bridge client + adapter contract, API popup flow).
 - 2026-10-04: PR #5 (P3) merged. P4 implemented and reviewed (8 findings fixed): 127 backend tests, 3 bot Node tests, 5 E2E.
 - 2026-10-04: PR #4 (P2) merged. P3 implemented and reviewed (10 findings fixed): 117 backend tests (transform golden, adapter contract, API flow).
 - 2026-10-04: PR #3 (P1b) merged. P2 implemented and reviewed (10 findings fixed): 88 backend tests, 8 unit + 5 E2E (frontend).

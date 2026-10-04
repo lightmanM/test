@@ -55,7 +55,7 @@ test('Make workflow deploys through the platform popup', async ({ page, context 
   await page.getByRole('button', { name: 'Deploy', exact: true }).click()
   const popup = await popupOpened
   await popup.getByRole('link', { name: /finish/ }).click()
-  await expect(popup.getByText('All set')).toBeVisible()
+  await expect(popup.getByText('Almost done')).toBeVisible()
   await expect(page.getByTestId('status')).toHaveText('Active')
 })
 

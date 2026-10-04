@@ -43,7 +43,7 @@ def make_callback(request: Request, svc: Services, db: DB, state: str = "") -> H
         svc_deployments.finish_user_step(svc, db, payload, params)
     except DeploymentError as exc:
         return _page("Couldn't finish the deploy", exc.message, ok=False)
-    return _page("All set", "Your workflow is deployed. You can close this window.", ok=True)
+    return _page("Almost done", "The demo is finishing your deploy. You can close this window.", ok=True)
 
 
 @router.get("/fake/make-popup", response_class=HTMLResponse)

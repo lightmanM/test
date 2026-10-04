@@ -103,7 +103,7 @@ def test_make_popup_flow(user):
     assert user.get(f"/fake/make-popup?state={state}").status_code == 200
     assert user.get("/make/callback?state=forged").status_code == 400
     page = user.get(f"/make/callback?state={state}")
-    assert page.status_code == 200 and "All set" in page.text
+    assert page.status_code == 200 and "Almost done" in page.text
     dep = user.get("/api/deployments/github-merge-slack").json()
     assert dep["status"] == "active"
     assert dep["popup_url"] is None
