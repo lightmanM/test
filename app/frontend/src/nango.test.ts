@@ -1,24 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from './api'
-import { connectWithNango } from './nango'
+import { connectWithNango as connect } from './nango'
 
 type OnEvent = (event: { type: string; payload?: unknown }) => Promise<void> | void
 
-const ui = vi.hoisted(() => ({
+const ui = {
   onEvent: null as OnEvent | null,
   props: null as Record<string, unknown> | null,
   close: vi.fn(),
-}))
+}
 
-vi.mock('@nangohq/frontend', () => ({
-  default: class {
-    openConnectUI({ onEvent, ...props }: { onEvent: OnEvent }) {
-      ui.onEvent = onEvent
-      ui.props = props
-      return { close: ui.close }
-    }
-  },
-}))
+class FakeNango {
+  openConnectUI({ onEvent, ...props }: { onEvent: OnEvent }) {
+    ui.onEvent = onEvent
+    ui.props = props
+    return { close: ui.close }
+  }
+}
+
+// The real SDK needs a DOM; inject a stand-in instead.
+const connectWithNango = (connector: string) =>
+  connect(connector, async () => ({ default: FakeNango as never }))
 
 const opened = () => vi.waitFor(() => expect(ui.onEvent).not.toBeNull())
 

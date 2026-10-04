@@ -1,15 +1,17 @@
+import type NangoSdk from '@nangohq/frontend'
 import { api } from './api'
+
+type LoadSdk = () => Promise<{ default: typeof NangoSdk }>
+
+// Loaded on demand: most visits never open the dialog.
+const loadSdk: LoadSdk = () => import('@nangohq/frontend')
 
 /**
  * Open Nango's Connect UI for one connector and save the resulting connection.
  * Resolves true once the connection is stored, false if the user closed the dialog first.
  */
-export async function connectWithNango(connector: string): Promise<boolean> {
-  // Loaded on demand: most visits never open the dialog.
-  const [{ default: Nango }, session] = await Promise.all([
-    import('@nangohq/frontend'),
-    api.startSession(connector),
-  ])
+export async function connectWithNango(connector: string, load: LoadSdk = loadSdk): Promise<boolean> {
+  const [{ default: Nango }, session] = await Promise.all([load(), api.startSession(connector)])
   return new Promise((resolve, reject) => {
     let settled = false
     let saving = false
