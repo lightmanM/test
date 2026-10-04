@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -20,7 +21,9 @@ from workflow_demo.adapters.base import (
     AdapterError,
     Availability,
     DeployContext,
+    DeploymentSnapshot,
     DeployResult,
+    OrphanReport,
     RunStarted,
     RunSummary,
 )
@@ -36,6 +39,8 @@ RETRY_TTL = 60  # after an error that may go away (network, credentials being fi
 FINISH_DELAYS = (1, 2, 3, 5, 5, 8, 8, 13, 13, 21, 21, 21)
 REQUIRED = ("make_bridge_key_id", "make_bridge_secret", "make_bridge_template_id")
 LOG_STATUS = {1: "success", 2: "success", 3: "error"}  # 2 = finished with warnings
+IN_FLIGHT = {"deploying", "redeploying", "awaiting_user", "stopping"}
+RECENT_USERS = timedelta(days=2)  # orphan sweep: users with Make activity this recent
 
 
 def subject(username: str) -> str:
@@ -209,27 +214,75 @@ class MakeBridgeAdapter:
     def _remove_strays(self, bridge: BridgeClient, user: str, name: str, keep: set[int]) -> None:
         """Best effort: delete this user's scenarios for this workflow that the demo doesn't track."""
         try:
-            integrations = bridge.integrations(user)
-        except BridgeError:
+            listed = self._scenarios(bridge, user)
+        except AdapterError:
             log.warning("couldn't list Make integrations for cleanup", exc_info=True)
             return
-        for item in integrations:
-            scenario = item.get("scenario") if isinstance(item, dict) else None
-            if not isinstance(scenario, dict) or scenario.get("name") != name:
-                continue
-            try:
-                stray = int(scenario["id"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            if stray not in keep:
-                self._delete_quietly(bridge, user, stray)
+        for scenario_id, scenario_name_ in listed:
+            if scenario_name_ == name and scenario_id not in keep:
+                self._delete_quietly(bridge, user, scenario_id)
 
     @staticmethod
-    def _delete_quietly(bridge: BridgeClient, user: str, scenario_id: int) -> None:
+    def _scenarios(bridge: BridgeClient, user: str) -> list[tuple[int, str]]:
+        """``(id, name)`` of the scenarios in this user's Bridge sandbox."""
+        try:
+            integrations = bridge.integrations(user)
+        except BridgeError as exc:
+            raise AdapterError(f"Couldn't list Make integrations: {exc}") from None
+        found = []
+        for item in integrations:
+            scenario = item.get("scenario") if isinstance(item, dict) else None
+            if not isinstance(scenario, dict):
+                continue
+            try:
+                found.append((int(scenario["id"]), str(scenario.get("name") or "")))
+            except (KeyError, TypeError, ValueError):
+                continue
+        return found
+
+    @staticmethod
+    def _delete_quietly(bridge: BridgeClient, user: str, scenario_id: int) -> bool:
         try:
             bridge.delete(user, scenario_id)
         except BridgeError:
             log.warning("couldn't delete Make scenario %s", scenario_id, exc_info=True)
+            return False
+        return True
+
+    # ------------------------------------------------------------------ orphan sweep
+
+    def sweep_orphans(
+        self,
+        deployments: list[DeploymentSnapshot],
+        older_than: datetime,
+        current: Callable[[str], list[DeploymentSnapshot]] | None = None,
+    ) -> OrphanReport:
+        """Delete demo scenarios in users' Bridge sandboxes that their deployments don't track.
+
+        Only users with Make activity in the last two days (older ones were swept already), one
+        listing per user, and never while one of their Make deployments is mid-flight — re-checked
+        with ``current(username)`` right before each delete, since a popup can finish meanwhile."""
+        report = OrphanReport()
+        if self._client is None:
+            return report
+        recent = older_than - RECENT_USERS
+        users = sorted({d.username for d in deployments if _is_make(d) and d.updated_at >= recent})
+        for username in users:
+            user = subject(username)
+            try:
+                listed = self._scenarios(self._client, user)
+            except AdapterError as exc:
+                report.errors.append(f"Make ({username}): {exc}")
+                continue
+            for scenario_id, name in listed:
+                fresh = current(username) if current else [d for d in deployments if d.username == username]
+                if not _untracked(scenario_id, name, username, fresh):
+                    continue
+                if self._delete_quietly(self._client, user, scenario_id):
+                    report.removed.append(f"Make scenario {scenario_id} ({username})")
+                else:
+                    report.errors.append(f"Make scenario {scenario_id} ({username}): delete failed")
+        return report
 
     # ------------------------------------------------------------------ runs
 
@@ -255,6 +308,26 @@ class MakeBridgeAdapter:
             raise AdapterError(f"Couldn't read runs from Make: {exc}") from None
         # Only finished executions carry a status; other log events (edits, starts) are skipped.
         return [summarize_log(item) for item in logs if item.get("status") in LOG_STATUS][:limit]
+
+
+def _is_make(dep: DeploymentSnapshot) -> bool:
+    return dep.workflow is not None and dep.workflow.platform is Platform.MAKE
+
+
+def _untracked(scenario_id: int, name: str, username: str, deployments: list[DeploymentSnapshot]) -> bool:
+    """A scenario with one of this user's demo names that none of their Make deployments uses."""
+    mine = [d for d in deployments if d.username == username and _is_make(d)]
+    if any(d.status in IN_FLIGHT for d in mine):
+        return False
+    if name not in {scenario_name(d.workflow, username) for d in mine}:
+        return False
+    tracked = set()
+    for dep in mine:
+        try:
+            tracked.add(int(dep.refs["scenario_id"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return scenario_id not in tracked
 
 
 def summarize_log(item: dict[str, Any]) -> RunSummary:

@@ -55,6 +55,24 @@ class DeployContext:
 
 
 @dataclass(frozen=True)
+class DeploymentSnapshot:
+    """What the orphan sweep knows about one deployment row (any status)."""
+
+    username: str
+    workflow_id: str
+    workflow: WorkflowEntry | None  # None if the catalog no longer has it (its refs still count)
+    status: str
+    refs: dict[str, Any]
+    updated_at: datetime
+
+
+@dataclass
+class OrphanReport:
+    removed: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class Availability:
     available: bool
     reason: str | None = None

@@ -117,10 +117,30 @@ test('Meegle token is saved encrypted and never shown again', async ({ page }) =
   await expect(token).not.toContainText('Connected')
 })
 
-test('admin sees users and deployments', async ({ page }) => {
+test('admin checks setup, sweeps and stops a deployment', async ({ page }) => {
   await signIn(page, 'e2e-dave')
+  await page.getByTestId('card-uptime-monitor').click()
+  for (const connector of ['google', 'slack']) {
+    await page.getByTestId(`connector-${connector}`).getByRole('button', { name: /Connect/ }).click()
+    await expect(page.getByTestId(`connector-${connector}`)).toContainText('Connected')
+  }
+  await page.locator('select[name="slack_channel"]').selectOption({ label: '#general' })
+  await page.getByRole('button', { name: 'Deploy', exact: true }).click()
+  await expect(page.getByTestId('status')).toHaveText('Active')
+
   await page.goto('/admin')
   await page.getByPlaceholder('Admin passcode').fill('e2e-admin')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.getByTestId('admin-users')).toContainText('e2e-dave')
+
+  await page.getByRole('button', { name: 'Run setup check' }).click()
+  await expect(page.getByTestId('setup-check')).toContainText('Database')
+  await expect(page.getByTestId('setup-check')).toContainText('Fake platforms')
+  await page.getByRole('button', { name: 'Run sweeper now' }).click()
+  await expect(page.getByTestId('sweep-report')).toContainText('Nothing to do.')
+
+  const row = page.getByTestId('admin-users').locator('tr', { hasText: 'e2e-dave' })
+  page.once('dialog', (dialog) => dialog.accept())
+  await row.getByRole('button', { name: 'Stop' }).click()
+  await expect(row.getByTestId('status')).toHaveText('Stopped')
 })
