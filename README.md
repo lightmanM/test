@@ -14,7 +14,7 @@ team's workflows to n8n, Make and Modal — then try them and see the results.
 |---|---|
 | `demo-project/` | The team's original workflows (read-only) |
 | `catalog/` | Demo templates generated from the originals + one `catalog.yaml` per workflow |
-| `app/backend/` | Python backend (FastAPI from P1) |
+| `app/backend/` | Python backend (FastAPI): `workflow_demo/` package, Alembic `migrations/`, `tests/` |
 | `scripts/` | `build_catalog.py` (regenerate templates), `compile_n8n_sdk.mjs` |
 
 ## Development
@@ -24,6 +24,10 @@ python -m venv .venv && . .venv/bin/activate
 pip install -e "app/backend[dev]"
 (cd app/backend && ruff check . && pytest -q)
 python scripts/build_catalog.py --check      # templates match demo-project/ + fixes
+
+# Run the backend locally with fake platforms (no credentials needed)
+cp app/backend/.env.example app/backend/.env
+(cd app/backend && python -m workflow_demo)  # http://localhost:8000/api/docs
 
 # Only when the Meegle digest SDK source changes (needs Node 20+):
 npm install --prefix scripts
