@@ -213,6 +213,40 @@ def test_credentials_never_request_the_refresh_token(live):
 
 
 @respx.mock
+def test_revoked_connection_asks_to_reconnect(live):
+    # Google ends sign-ins to an External "Testing" OAuth app after 7 days; Nango then answers
+    # with `invalid_credentials` (status taken from the refresh error, 400 for Google).
+    svc, client = live
+    respx.get("https://openidconnect.googleapis.com/v1/userinfo").mock(
+        return_value=httpx.Response(200, json={"email": "alice@acme.dev"})
+    )
+    route = respx.get(f"{NANGO}/connections/g-1").mock(
+        return_value=httpx.Response(200, json=nango_connection("g-1", "google", "alice"))
+    )
+    client.post("/api/connections/google/complete", json={"connection_id": "g-1"})
+    route.mock(
+        return_value=httpx.Response(
+            400,
+            json={
+                "error": {
+                    "code": "invalid_credentials",
+                    "message": "The external API returned an error when trying to refresh the access "
+                    "token. Please try again later.",
+                }
+            },
+        )
+    )
+    from workflow_demo.services.connections import ConnectionError_, fresh_credentials
+
+    with svc.db.session() as db, pytest.raises(ConnectionError_) as caught:
+        fresh_credentials(svc, db.query(Connection).one())
+    assert caught.value.status_code == 409
+    assert caught.value.message == (
+        "Your Google (Sheets and Gmail) connection has expired. Reconnect it, then try again."
+    )
+
+
+@respx.mock
 def test_delete_removes_nango_connection(live):
     svc, client = live
     respx.get(f"{NANGO}/connections/conn-1").mock(

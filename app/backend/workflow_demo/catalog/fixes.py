@@ -307,7 +307,11 @@ def fix_medium_digest(original: Workflow) -> Workflow:
     llm["parameters"]["options"]["timeout"] = MEDIUM_LLM_TIMEOUT_MS
     wj.set_credential_slot(llm, "openAiApi", "openai")
 
-    wj.set_credential_slot(wj.node(wf, "Find Medium Daily Digest emails"), "gmailOAuth2", "google")
+    gmail = wj.node(wf, "Find Medium Daily Digest emails")
+    wj.set_credential_slot(gmail, "gmailOAuth2", "google")
+    # An empty inbox must still reach "Build empty report" (via Extract article links → noArticles);
+    # without this n8n ends the run silently when Gmail finds nothing.
+    gmail["alwaysOutputData"] = True
     slack = wj.node(wf, "Send report to Slack")
     _require(slack["parameters"].get("authentication") == "accessToken", "Slack node auth changed")
     wj.set_credential_slot(slack, "slackApi", "slack")

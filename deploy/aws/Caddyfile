@@ -1,0 +1,18 @@
+# The two public hostnames (sslip.io names of the server's IP, so no DNS setup is needed).
+# Caddy gets and renews their HTTPS certificates itself.
+
+{$DEMO_HOST} {
+	encode zstd gzip
+	reverse_proxy demo:8000
+}
+
+{$N8N_HOST} {
+	# Until setup_n8n.py has created the owner, anyone could claim a fresh instance: allow the
+	# owner sign-up only from the machine that runs deploy.sh (ADMIN_IP, set by deploy.sh).
+	@owner_setup {
+		path /rest/owner/setup
+		not remote_ip {$ADMIN_IP:127.0.0.1}
+	}
+	respond @owner_setup 403
+	reverse_proxy n8n:5678
+}

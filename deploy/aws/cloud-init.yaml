@@ -1,0 +1,36 @@
+#cloud-config
+# First boot of the demo server (Ubuntu 24.04, used by provision.sh): Docker from Docker's own
+# repository, capped container logs, a swap file (the reader runs a browser) and the app folder
+# that deploy.sh copies into.
+
+package_update: true
+package_upgrade: true
+
+apt:
+  sources:
+    docker.list:
+      source: "deb [arch=amd64 signed-by=$KEY_FILE] https://download.docker.com/linux/ubuntu $RELEASE stable"
+      keyid: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+
+packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+  - rsync
+
+write_files:
+  - path: /etc/docker/daemon.json
+    content: |
+      {"log-driver": "local", "log-opts": {"max-size": "20m", "max-file": "5"}}
+
+swap:
+  filename: /swapfile
+  size: 4G
+
+runcmd:
+  - usermod -aG docker ubuntu
+  - install -d -o ubuntu -g ubuntu /opt/workflow-demo
+  - systemctl enable docker
+  - systemctl restart docker

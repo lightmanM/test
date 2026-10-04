@@ -6,6 +6,9 @@ description: |
   posts it to a Slack channel. Runs on Make; you connect GitHub and Slack, and pick the repo
   and channel, inside Make's popup.
 platform: make
+unavailable_note: >-
+  Not available right now: Make has discontinued Bridge, the feature this demo used to give each
+  tester their own Make scenario with their own GitHub and Slack accounts.
 source: demo-project/GitHub 合并提交 Diff 通知前端.blueprint.json
 connectors:
   - id: make_github

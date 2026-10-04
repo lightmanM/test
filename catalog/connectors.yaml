@@ -12,8 +12,9 @@ google:
   kind: nango
   integration: google
   description: >-
-    Your company Google account. Used to create and update a spreadsheet in your Drive and
-    to read Medium emails in your Gmail (read-only).
+    Your Google account (it must be on the demo's tester list). Used to create and update a
+    spreadsheet in your Drive and to read Medium emails in your Gmail (read-only). Google ends
+    the sign-in after 7 days; reconnect when the demo asks.
 
 meegle_mcp_token:
   name: Meegle MCP token

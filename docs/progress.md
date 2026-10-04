@@ -3,10 +3,11 @@
 Living document. Update at the end of every work session and every PR.
 
 ## Current status
-- **Phase**: P0–P6 done; P7 packaging merged ([#9](https://github.com/lightmanM/test/pull/9)). The live part of P7 is next.
-- **Next step**: the owner provides the accounts and keys (plan §15); then run `docs/go-live.md` together
-  (deploy services + demo, setup check, live checklist) and mark P7 done.
-- **Blocked on owner**: credentials for P7 (plan §15).
+- **Phase**: P0–P6 done; P7 live on AWS (2026-10-04; address in the git-ignored `deploy/aws/.env`).
+  Setup check green except Make Bridge; 4 of 5 workflows available and live-tested.
+- **Next step**: finish the live checklist (`docs/go-live.md` §6): Slack bot (owner's Meegle user key), redeploy/delete
+  of each, second tester, short-TTL expiry; then open the PR for the AWS move and mark P7 done.
+- **Blocked**: GitHub merge → Slack — Make discontinued Bridge (<https://f.make.com/bridge>); left "Deploy unavailable".
 
 ## Phases and PRs
 
@@ -175,9 +176,22 @@ force `recover_jobs_on_startup=False` and `sweep_interval_seconds=0` in code sin
 non-Postgres `DATABASE_URL`. A job that can't be started fails its deployment at once (503) instead of leaving it
 busy. Settings come from the Modal secret `workflow-demo-app`
 (`deploy/production.env.example`, `ORPHAN_SWEEP=true`). Step-by-step: `docs/go-live.md`.
+**Moved to AWS (2026-10-04)**: one EC2 t3.large in `pond-new` us-west-2 (us-east-2 had no vCPU quota) running Docker
+Compose (`deploy/aws/`): Caddy (sslip.io hostnames, Let's Encrypt), the demo (one process: thread job runner, sweeper
+thread, migrations on start), self-hosted n8n 2.41.6 + `n8nio/runners` (external mode), the team's reader (its own
+Dockerfile — the Modal build failed on `add_python`), the team's bot (+ `demo.patch`) and Postgres 17 (demo + n8n
+databases). `provision.sh` (EC2/SG/key/EIP), `deploy.sh` (rsync + compose; checks shared tokens match),
+`setup_n8n.py` (owner + API key via n8n's REST API). The Modal files remain but are unused.
+Accounts set up: Google Cloud project "Workflow Demo" (External, Testing, 9 test users, 5 scopes, web client →
+Nango), Slack app "Workflow Demo", Nango prod (`slack`, `google` created through its API), OpenAI key.
+Live fixes (test-first): n8n 2.x refuses to delete a published workflow (409) and unpublishes in the background →
+`delete_workflow` unpublishes (`/unpublish`, `/deactivate` fallback) and retries for ~15 s; Medium digest's Gmail node
+gets `alwaysOutputData` so an empty inbox reaches "Build empty report" (bug in the team's original too); a refused
+Nango refresh (`invalid_credentials`) asks to reconnect. 165 backend tests.
 - [x] Modal app for the demo (web, jobs, sweeper, migrate) + production settings template + go-live guide
-- [ ] Owner credentials configured; services and demo deployed; setup check green (needs the owner, §15)
-- [ ] Live test of every workflow; short-TTL expiry test (`docs/go-live.md` §6)
+- [x] AWS server + Compose stack; owner credentials configured; setup check green (Make Bridge: discontinued)
+- [ ] Live test of every workflow — uptime ✓ (deploy, run, delete), Medium ✓ (deploy, redeploy, run), Meegle digest ✓
+      (deploy, run); Slack bot, second tester and short-TTL expiry still to do (`docs/go-live.md` §6)
 
 ## Decision log
 
@@ -189,6 +203,9 @@ busy. Settings come from the Modal secret `workflow-demo-app`
 | 2026-10-04 | Slack bot: one shared deployment with a demo bot app (owner provides later); testers "Activate for me" with their Meegle user key. |
 | 2026-10-04 | Use Nango Cloud for Slack + Google token storage/refresh (not our own OAuth code). |
 | 2026-10-04 | Google OAuth client is **Internal** (company Workspace accounts only). |
+| 2026-10-04 | Hosting moved from Modal + Neon + n8n Cloud to **one AWS EC2 server** (owner's AWS credits): Docker Compose with self-hosted n8n, the reader, the bot and Postgres. |
+| 2026-10-04 | **Make Bridge discontinued** by Make: GitHub merge → Slack stays "Deploy unavailable" for now (option C): `DISABLED_WORKFLOWS=github-merge-slack` on the server shows the catalog's `unavailable_note` to testers. Alternatives on file: rebuild on n8n (recommended) or Make Core with HTTP modules. |
+| 2026-10-04 | Google OAuth client changed to **External + Testing** (testers span joinpond.ai and cryptopond.xyz; an Internal app covers one organization). Testers are added as test users in the Cloud console only — not in this public repo. A refused Nango refresh (`invalid_credentials`) now tells the tester to reconnect. |
 | 2026-10-04 | Meegle MCP token: per-user text box, encrypted in our DB. |
 | 2026-10-04 | Freedium kept for the Medium reader (owner's decision; risk noted in plan §14). |
 | 2026-10-04 | Limits: ≤10 users · uptime every 30 min · Medium ≤5 articles/run · deployments expire after 24 h. |
@@ -197,6 +214,8 @@ busy. Settings come from the Modal secret `workflow-demo-app`
 | 2026-10-04 | Leaked Meegle token removed from git history (2 commits rewritten; `main` now at e7c40dc). Owner to revoke the token in Meegle. |
 
 ## Session log
+- 2026-10-04: P7 live on AWS: provisioned the server, deployed the stack, set up Google/Slack/Nango/OpenAI, live-tested uptime, Medium and Meegle digest; fixed n8n delete (unpublish + retry) and the Medium empty-inbox path (165 backend tests).
+- 2026-10-04: Go-live prep: Google OAuth switched to External + Testing (docs: setup guide §3, go-live, plan R14/§15, research notes); expired Nango connections now ask to reconnect (158 backend tests).
 - 2026-10-04: PR #9 (P7 packaging) merged — all 9 PRs in. Remaining: the live go-live run with the owner's credentials.
 - 2026-10-04: PR #8 (P6) merged. P7 packaging: Modal app for the demo, production settings template, go-live guide; reviewed (10 findings fixed), 157 backend tests.
 - 2026-10-04: PR #7 (P5) merged. P6 implemented and reviewed (10 findings fixed): 156 backend tests, 5 E2E (admin lifecycle).

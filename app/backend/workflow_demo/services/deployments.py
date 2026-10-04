@@ -73,6 +73,9 @@ def workflow_entry(svc: AppServices, workflow_id: str) -> WorkflowEntry:
 
 
 def availability(svc: AppServices, entry: WorkflowEntry) -> Availability:
+    disabled = {wid.strip() for wid in svc.settings.disabled_workflows.split(",") if wid.strip()}
+    if entry.id in disabled:
+        return Availability(False, entry.unavailable_note or "Not available on this server right now")
     try:
         return svc.registry.get(entry.platform).check_available(entry)
     except AdapterError as exc:

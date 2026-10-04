@@ -1,7 +1,7 @@
 # Setup Guide (owner)
 
 Everything the owner creates before go-live (phase P7). Each section ends with the settings it
-produces; they all go into the demo's Modal secret (see §10). Nothing here is committed to git.
+produces; they all go into `deploy/production.env` (see §10). Nothing here is committed to git.
 
 ## 1. Slack — "Connect Slack" app (used through Nango)
 
@@ -37,7 +37,7 @@ Produces: Slack **Client ID**, **Client Secret** (entered in Nango, §3).
 
 ## 2. Slack — shared bot app ("Slack → Meegle card bot")
 
-One bot for all testers, running on Modal in Socket Mode. **It must not also run anywhere else**
+One bot for all testers, running on the demo server in Socket Mode. **It must not also run anywhere else**
 (Slack would split messages between the copies). Manifest:
 
 ```yaml
@@ -76,20 +76,34 @@ Then: **Basic Information → App-Level Tokens → Generate** with scope `connec
 
 Produces: `SLACK_BOT_TOKEN` (`xoxb-…`), `SLACK_APP_TOKEN` (`xapp-…`).
 
-## 3. Google Cloud — Internal OAuth client
+## 3. Google Cloud — External OAuth client in "Testing"
 
-Used by Nango for **Connect Google**, and by n8n to refresh Google tokens.
+Used by Nango for **Connect Google**, and by n8n to refresh Google tokens. The testers' accounts
+are on two Workspace domains, so the app is **External** (an Internal app covers one organization
+only) and stays in **Testing** (Gmail read is a restricted scope; verification isn't worth it for a
+demo).
 
-1. <https://console.cloud.google.com> → create (or pick) a project in the company organization.
+1. <https://console.cloud.google.com> → create (or pick) a project. Any Google account can own it.
 2. **APIs & Services → Library**: enable *Google Sheets API*, *Google Drive API*, *Gmail API*.
-3. **OAuth consent screen**: User type **Internal**; app name "Workflow Demo"; support email.
-   Scopes: `openid`, `.../auth/userinfo.email`, `.../auth/spreadsheets`, `.../auth/drive.file`,
-   `.../auth/gmail.readonly`.
-4. **Credentials → Create credentials → OAuth client ID**: type **Web application**;
-   authorized redirect URI `https://api.nango.dev/oauth/callback`.
+3. **Google Auth Platform → Branding**: app name "Workflow Demo"; support email.
+4. **Audience**: user type **External**; publishing status **Testing** (do *not* publish).
+   **Test users → Add users**: every tester's Google account, one by one (no domains or wildcards;
+   up to 100). The list lives only in the Cloud console — it isn't kept in this public repo.
+5. **Data access**: scopes `openid`, `.../auth/userinfo.email`, `.../auth/spreadsheets`,
+   `.../auth/drive.file`, `.../auth/gmail.readonly`.
+6. **Clients → Create client**: type **Web application**; authorized redirect URI
+   `https://api.nango.dev/oauth/callback`.
 
-Produces: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`. Only accounts in the company Google
-Workspace can connect.
+Produces: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`.
+
+What testers see and what to expect:
+- Only listed accounts can connect; anyone else gets "access denied". Add a new tester before
+  they try.
+- Google shows a "hasn't verified this app" notice before its consent screen; testers continue.
+- Every sign-in ends **7 days** after consent. The demo then says the Google connection has expired
+  and asks to reconnect (deployments last 24 h, so this only affects later deploys).
+- A Workspace admin can block unverified apps from reading Gmail. Connect one tester first; if
+  Google refuses, ask the admin to trust the client ID (Admin console → Security → API controls).
 
 ## 4. Nango
 
@@ -102,15 +116,21 @@ Workspace can connect.
 
 Produces: `NANGO_SECRET_KEY` (integration IDs default to `slack` and `google`).
 
-## 5. n8n Cloud
+## 5. n8n (self-hosted on the demo server)
 
-1. Paid plan (the free trial has no API). Pro recommended: Starter stops any run after 5 minutes,
-   which is tight for the Medium digest.
-2. **Settings → n8n API → Create an API key**.
+Nothing to buy or sign up for: n8n Community Edition runs on the AWS server next to the demo
+(`deploy/aws/compose.yml`; the public API is in every self-hosted edition, and there is no run
+time limit). `deploy/aws/setup_n8n.py` creates the owner account and the demo's API key
+(`docs/go-live.md` §4). Code nodes run in a separate `n8nio/runners` container of the same version.
 
-Produces: `N8N_BASE_URL` (e.g. `https://yourname.app.n8n.cloud`), `N8N_API_KEY`.
+Produces: `N8N_BASE_URL=http://n8n:5678` (internal address), `N8N_API_KEY`. The editor is at
+`https://<N8N_HOST>` for the owner.
 
 ## 6. Make
+
+> **Make discontinued Bridge** (<https://f.make.com/bridge>), so this section can't be completed today. The hosted
+> demo switches the workflow off with `DISABLED_WORKFLOWS=github-merge-slack`; remove that line once Make offers
+> a replacement and the settings below exist.
 
 1. Team ID: the number in the team URL (`…/team/<id>/…`) — only needed if the Bridge template
    lives in a specific team.
@@ -121,21 +141,23 @@ The demo only talks to the Bridge API (no Make API token needed). Produces: `MAK
 (optional), `MAKE_BRIDGE_TEMPLATE_ID`, `MAKE_BRIDGE_KEY_ID`, `MAKE_BRIDGE_SECRET`
 (`MAKE_ZONE` = `us2.make.com`).
 
-## 7. Modal
+## 7. AWS (the server)
 
-1. Workspace → **Settings → API Tokens → New token** (or `modal token new`).
+1. An AWS CLI profile for the account that pays (here `pond-new`) with EC2 rights (instances,
+   security groups, key pairs, Elastic IPs) and `ssm:GetParameter` (to find the Ubuntu image).
+2. Free On-Demand vCPU quota for one 2-vCPU instance in the region (`pond-new`'s us-east-2 is full,
+   so the script uses us-west-2).
 
-Produces: `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`. The demo, the Medium reader and the Slack bot
-are deployed into this workspace.
+`deploy/aws/provision.sh` creates the server; Docker Compose on it runs the demo, n8n, the Medium
+reader, the Slack bot and Postgres (`docs/go-live.md`). Roughly $65/month at list price (t3.large,
+40 GB disk, Elastic IP); stop the instance to pause it.
 
-## 8. Neon
+## 8. Database
 
-1. Create a project at <https://neon.tech> (free tier is enough; the demo's sweeper runs every
-   30 minutes, so the compute can suspend in between).
-2. Copy the **pooled** connection string (`postgresql://…-pooler…?sslmode=require`) for the app and
-   the **direct** one (connection pooling off) for schema migrations.
+Nothing to set up: Postgres runs on the server (`postgres` service), with one database for the
+demo and one for n8n, created on first start by `deploy/aws/postgres-init.sh`.
 
-Produces: `DATABASE_URL` (pooled), `MIGRATION_DATABASE_URL` (direct).
+Produces: `DATABASE_URL=postgresql://demo:<DEMO_DB_PASSWORD>@postgres:5432/workflow_demo`.
 
 ## 9. AI key and Meegle
 
@@ -148,13 +170,14 @@ Produces: `DATABASE_URL` (pooled), `MIGRATION_DATABASE_URL` (direct).
 
 ## 10. Demo configuration
 
-All values above, plus these generated ones, go into a Modal secret named `workflow-demo-app`
-(template: `deploy/production.env.example`; step-by-step: `docs/go-live.md`):
+All values above, plus these generated ones, go into `deploy/production.env` (template:
+`deploy/production.env.example`; server-side values in `deploy/aws/.env`; step-by-step:
+`docs/go-live.md`):
 
 | Setting | Value |
 |---|---|
-| `DEMO_PASSCODE` | shared tester passcode (owner picks) |
-| `ADMIN_PASSCODE` | admin page passcode (owner picks) |
+| `DEMO_PASSCODE` | shared tester passcode (owner picks; a random one was generated) |
+| `ADMIN_PASSCODE` | admin page passcode (owner picks; a random one was generated) |
 | `SESSION_SECRET`, `DATA_ENCRYPTION_KEY`, `READER_API_TOKEN`, `BOT_API_TOKEN` | random; generated during P7 |
-| `PUBLIC_BASE_URL` | the demo's Modal URL |
+| `PUBLIC_BASE_URL` | `https://<DEMO_HOST>` (the sslip.io name from `provision.sh`) |
 | `MAX_USERS` / `DEPLOYMENT_TTL_HOURS` | `10` / `24` |

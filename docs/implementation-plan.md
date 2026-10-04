@@ -26,7 +26,7 @@ owner's single account on each platform.
 | R11 | **Limits**: uptime checks every 30 min · Medium digest ≤ 5 articles per run. |
 | R12 | **Workflow fixes** applied: Make reacts only to merged PRs · Uptime status-update fixed and unconnected Gmail step removed · Meegle digest posts to Slack only when a webhook is set. |
 | R13 | **Freedium is kept** for Medium article fetching (owner's decision). |
-| R14 | **Google OAuth app is "Internal"**: only accounts in the company Google Workspace can connect. |
+| R14 | **Google OAuth app is External, kept in "Testing"**: only the Google accounts on its test-user list (≤100, added one by one) can connect; sign-ins end after 7 days and the demo asks to reconnect. (Was "Internal"; the testers span two Workspace domains.) |
 
 ---
 
@@ -36,22 +36,21 @@ owner's single account on each platform.
  Browser (React SPA)
    │  cookie session
    ▼
- Demo backend (FastAPI on Modal) ──── Neon Postgres (users, connections, deployments, events)
-   │
+ Caddy (HTTPS) ─► Demo backend (FastAPI) ──── Postgres (users, connections, deployments, events)
+   │                  all on one AWS EC2 server (Docker Compose, deploy/aws/)
    ├── Nango Cloud ............ Slack + Google OAuth popups, token storage & refresh
-   ├── n8n Cloud API .......... credentials + workflows for 3 n8n workflows
-   ├── Make Bridge (portal) ... popup-based instancing of the Make workflow
-   ├── Modal .................. shared services: medium-reader, slack-meegle-bot
-   └── Background jobs (Modal functions): deploy/undeploy jobs, 10-min sweeper
+   ├── n8n (same server) ...... credentials + workflows for 3 n8n workflows; Code nodes in a runner sidecar
+   ├── Make Bridge (portal) ... popup-based instancing of the Make workflow (runs on Make's cloud)
+   ├── Same server ............ shared services: medium-reader, slack-meegle-bot
+   └── Background jobs: a thread pool in the demo process for deploy/undeploy jobs; 10-min sweeper thread
 ```
 
 **Tech stack**
 - Backend: Python 3.12, FastAPI, SQLAlchemy 2 + Alembic, Pydantic v2, httpx, PyJWT (Bridge), `cryptography` (AES-GCM for manual secrets).
 - Frontend: React + Vite + TypeScript + Tailwind; `@nangohq/frontend` for the Connect UI.
-- Hosting: Modal (`@modal.asgi_app` web app serving API + built SPA; spawned job functions; scheduled sweeper). Database: Neon Postgres.
-- Python backend is required anyway: Modal's deploy API is Python-only.
+- Hosting (changed at P7, 2026-10-04): one AWS EC2 server in the owner's `pond-new` account running Docker Compose — Caddy, the demo (one process: API + built SPA, job thread pool, sweeper thread), self-hosted n8n + `n8nio/runners`, the Medium reader, the Slack bot and Postgres. Originally Modal + Neon + n8n Cloud; `deploy/modal_app.py` and `services/*/modal_app.py` are that earlier packaging and are no longer used.
 
-**Why jobs run as Modal functions**: deploys take seconds to a minute; a spawned function (`run_job.spawn(job_id)`) survives the web container scaling down, and the UI polls status.
+**Why jobs run in the demo process**: one long-running server never scales to zero, so a thread pool is enough; on start, jobs left unfinished by a restart are failed (`recover_jobs_on_startup`) and the UI polls status.
 
 ---
 
@@ -123,7 +122,7 @@ a "Run now" trigger.
 
 ---
 
-## 4. Shared services (Modal)
+## 4. Shared services (on the demo server since P7; this table is the original Modal design)
 
 | Service | Source | Modal setup |
 |---|---|---|
@@ -245,13 +244,13 @@ demo-project/                     the team's originals (unchanged)
 | Area | Settings |
 |---|---|
 | Demo | `DEMO_PASSCODE`, `ADMIN_PASSCODE`, `SESSION_SECRET`, `DATA_ENCRYPTION_KEY`, `PUBLIC_BASE_URL`, `MAX_USERS=10`, `DEPLOYMENT_TTL_HOURS=24` |
-| Database | `DATABASE_URL` (Neon, pooled), `MIGRATION_DATABASE_URL` (direct, for migrations) |
+| Database | `DATABASE_URL` (the Postgres container on the server) |
 | Nango | `NANGO_SECRET_KEY`, integration keys |
-| Google (Internal OAuth client) | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (also needed for n8n Google credentials) |
+| Google (External OAuth client, Testing) | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (also needed for n8n Google credentials) |
 | Slack connect app | client ID / secret (configured in Nango) |
-| n8n | `N8N_BASE_URL`, `N8N_API_KEY` |
+| n8n | `N8N_BASE_URL` (`http://n8n:5678`, same server), `N8N_API_KEY` (created by `deploy/aws/setup_n8n.py`) |
 | Make | `MAKE_ZONE=us2.make.com`, `MAKE_TEAM_ID` (optional), `MAKE_BRIDGE_KEY_ID`, `MAKE_BRIDGE_SECRET`, `MAKE_BRIDGE_TEMPLATE_ID` (Bridge API only) |
-| Modal | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` |
+| Server | `deploy/aws/.env`: hostnames, Postgres passwords, `N8N_ENCRYPTION_KEY`, `N8N_RUNNERS_AUTH_TOKEN`, `N8N_VERSION` |
 | LLM | `OPENAI_API_KEY`, optional `OPENAI_BASE_URL` (testers pick the model) |
 | Reader | `READER_API_TOKEN` (generated), `FREEDIUM_BASE_URL` |
 | Slack bot | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `MEEGLE_PLUGIN_ID`, `MEEGLE_PLUGIN_SECRET`, `MEEGLE_PROJECT_KEY`, `MEEGLE_SIMPLE_NAME`, `MEEGLE_WORK_ITEM_TYPE_KEY`, `MEEGLE_USER_KEY`, `BOT_API_TOKEN` |
@@ -278,7 +277,7 @@ demo-project/                     the team's originals (unchanged)
 | P4 Modal services | Reader and bot on Modal; bot patches; "Activate for me" | Services deployable via script; activation flow tested |
 | P5 Make Bridge | Bridge adapter, availability check, popup + callback, run/logs/delete, `make-setup.md` | Contract tests pass; "unavailable" path works |
 | P6 Lifecycle & admin | 24 h sweeper, redeploy, delete, admin page, setup check | E2E covers lifecycle |
-| P7 Go live | Deploy to Modal + Neon, plug in credentials, run live checklist | All live checks pass |
+| P7 Go live | Deploy to one AWS server (was Modal + Neon), plug in credentials, run live checklist | All live checks pass |
 
 P0–P6 need no credentials (fake mode + mocked APIs). P7 starts when the owner provides them.
 
@@ -289,12 +288,12 @@ P0–P6 need no credentials (fake mode + mocked APIs). P7 starts when the owner 
 | Risk | Handling |
 |---|---|
 | Make Bridge not enabled on the owner's account | Card shows "Deploy unavailable" (agreed) |
-| n8n Starter stops runs after 5 min (Pro: 40 min) | Medium digest capped at 5 articles with shorter timeouts (typical run 1–3 min); worst case can still exceed 5 min → Pro plan recommended |
+| ~~n8n Starter stops runs after 5 min~~ | Resolved: self-hosted n8n has no run time limit (Medium digest still capped at 5 articles) |
 | n8n version differences (publish vs activate) | Detect and fall back |
 | Freedium mirror changes/blocks requests; Medium terms | Kept by owner decision; per-article failures are already handled by the workflow |
-| Chromium in Modal containers | Verify memory/shared-memory flags during P4 |
+| Chromium (reader) on the server | `shm_size: 1gb`, `init: true` as in the team's compose file; t3.large (8 GB) + 4 GB swap |
 | Slack bot app also running elsewhere would split events | Use a dedicated demo bot app (owner provides) |
-| Google Internal app | Only company Workspace accounts can connect |
+| Google app External in "Testing" | Only listed test users can connect; "unverified app" notice; sign-ins end after 7 days (demo asks to reconnect); a Workspace admin may need to trust the client for Gmail |
 | Nango free plan = 10 connections | 10 users × (Slack + Google) needs Pay-as-you-go |
 | OpenAI usage cost per Medium run | Capped articles; owner's key |
 
@@ -303,15 +302,13 @@ P0–P6 need no credentials (fake mode + mocked APIs). P7 starts when the owner 
 ## 15. Needed from the owner at go-live (P7)
 
 1. Demo Slack app for the Connect popup (scopes in §8) and the bot app (Socket Mode; not running elsewhere) — manifests in `docs/setup-guide.md`.
-2. Google Cloud **Internal** OAuth client (Web) — setup guide provided.
+2. Google Cloud **External** OAuth client (Web) in **Testing**, with every tester added as a test user — setup guide provided.
 3. Nango account (Pay-as-you-go) + secret key.
 4. Make API token, team ID, Bridge key ID + secret (and Bridge enabled).
-5. n8n Cloud URL + API key (paid plan; Pro recommended).
-6. Modal token ID + secret.
-7. Neon connection string.
-8. OpenAI-compatible API key.
-9. Meegle: team plugin credentials for the shared bot; testers bring their own MCP tokens.
-10. Shared passcode and admin passcode.
+5. AWS account for the server (`pond-new`; EC2 in us-west-2). n8n, the database and the shared services run there — no n8n Cloud, Modal or Neon accounts needed.
+6. OpenAI-compatible API key.
+7. Meegle: team plugin credentials for the shared bot; testers bring their own MCP tokens.
+8. Shared passcode and admin passcode.
 
 ---
 

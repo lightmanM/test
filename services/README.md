@@ -1,4 +1,8 @@
-# Shared services on Modal
+# Shared services
+
+> **Since P7 both services run on the AWS server** (`reader` and `bot` in `deploy/aws/compose.yml`;
+> `docs/go-live.md`). The Modal wrappers and commands below are the earlier packaging, kept for
+> reference; `demo.patch` and its tests are still what the server's bot image uses.
 
 Two of the team's services run once for every tester, under the owner's Modal account. The
 team's code in `demo-project/` stays untouched; these folders only hold the Modal wrappers (and, for

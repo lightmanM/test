@@ -13,8 +13,9 @@ workflows, connect the accounts each one needs, deploy it to its own platform
 - `demo-project/` — the team's original workflows. **Read-only**; never edit.
 - `catalog/` — demo-ready copies of those workflows (fixes applied) + `catalog.yaml` per workflow.
 - `app/backend/` — FastAPI (Python 3.12). `app/frontend/` — React + Vite + TypeScript.
-- `services/` — Modal wrappers for the shared reader service and the Slack bot.
-- `deploy/` — Modal app for the demo itself. `scripts/` — compile/bootstrap/setup-check helpers.
+- `deploy/aws/` — the hosting: one AWS EC2 server running everything with Docker Compose (provision, deploy, n8n setup scripts; `docs/go-live.md`).
+- `services/` — the Slack bot's `demo.patch` (+ tests). `deploy/modal_app.py` and `services/*/modal_app.py` are the earlier Modal packaging, no longer used.
+- `scripts/` — compile/bootstrap/setup-check helpers.
 - `connector-demo/` — unrelated backup fixtures from an earlier n8n backup tool; leave alone.
 
 ## Rules

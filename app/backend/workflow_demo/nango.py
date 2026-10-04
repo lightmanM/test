@@ -10,9 +10,10 @@ import httpx
 
 
 class NangoError(Exception):
-    def __init__(self, message: str, status_code: int | None = None) -> None:
+    def __init__(self, message: str, status_code: int | None = None, code: str | None = None) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.code = code  # Nango's `error.code`, e.g. `invalid_credentials` when a refresh was refused
 
 
 @dataclass(frozen=True)
@@ -57,13 +58,15 @@ class NangoClient:
         except httpx.HTTPError as exc:
             raise NangoError(f"Nango is unreachable: {exc.__class__.__name__}") from None
         if resp.status_code >= 400:
+            code = None
             try:
                 detail = resp.json().get("error", {})
                 message = detail.get("message") if isinstance(detail, dict) else str(detail)
+                code = detail.get("code") if isinstance(detail, dict) else None
             except ValueError:
                 message = resp.text[:200]
             raise NangoError(
-                f"Nango error {resp.status_code}: {message or 'request failed'}", resp.status_code
+                f"Nango error {resp.status_code}: {message or 'request failed'}", resp.status_code, code
             )
         try:
             return resp.json() if resp.content else {}

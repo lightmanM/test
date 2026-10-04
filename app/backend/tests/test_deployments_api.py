@@ -160,6 +160,18 @@ def test_unavailable_platform_blocks_deploy(user, services):
     assert resp.status_code == 409
 
 
+def test_disabled_workflow_shows_its_note_and_blocks_deploy(user, services):
+    # Make discontinued Bridge: the server switches the workflow off; testers see the catalog's note.
+    note = services.catalog.workflow("github-merge-slack").unavailable_note
+    assert note and "Bridge" in note
+    services.settings.disabled_workflows = "github-merge-slack, other-id"
+    workflows = {w["id"]: w for w in user.get("/api/workflows").json()}
+    assert workflows["github-merge-slack"]["available"] is False
+    assert workflows["github-merge-slack"]["unavailable_reason"] == note
+    assert workflows["uptime-monitor"]["available"] is True
+    assert user.post("/api/deployments/github-merge-slack", json={"settings": {}}).status_code == 409
+
+
 def test_users_only_see_their_own_deployments(client, login):
     login("alice")
     connect(client, "google", "slack")

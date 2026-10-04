@@ -198,6 +198,13 @@ def fresh_credentials(
             include_refresh_token=include_refresh_token,
         )
     except NangoError as exc:
+        if exc.code == "invalid_credentials":
+            # The provider refused the refresh (revoked, or Google's 7-day limit for "Testing" apps).
+            found = svc.catalog.connectors.get(record.connector)
+            name = found.name if found else record.connector
+            raise ConnectionError_(
+                f"Your {name} connection has expired. Reconnect it, then try again.", 409
+            ) from None
         raise ConnectionError_(f"Couldn't read the {record.connector} connection: {exc}", 502) from None
 
 

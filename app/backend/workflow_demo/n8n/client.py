@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote
 
 import httpx
+
+# n8n unpublishes in the background; deleting right after answers 409 until it has finished.
+DELETE_RETRY_WAITS = (0.5, 1, 2, 4, 8)
 
 
 class N8nError(Exception):
@@ -15,9 +20,12 @@ class N8nError(Exception):
 
 
 class N8nClient:
-    def __init__(self, base_url: str, api_key: str, http: httpx.Client) -> None:
+    def __init__(
+        self, base_url: str, api_key: str, http: httpx.Client, sleep: Callable[[float], None] = time.sleep
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self._http = http
+        self._sleep = sleep
         self._headers = {"X-N8N-API-KEY": api_key, "Accept": "application/json"}
 
     # ------------------------------------------------------------------ plumbing
@@ -74,8 +82,35 @@ class N8nClient:
                 raise
             self._request("POST", f"{path}/activate", json={})
 
+    def unpublish_workflow(self, workflow_id: str) -> None:
+        """Unpublish (deactivate). ``/unpublish`` is n8n 2.33+; older versions only have ``/deactivate``."""
+        path = f"/workflows/{quote(workflow_id, safe='')}"
+        try:
+            self._request("POST", f"{path}/unpublish", json={})
+        except N8nError as exc:
+            if exc.status_code not in (404, 405):
+                raise
+            self._request("POST", f"{path}/deactivate", json={})
+
     def delete_workflow(self, workflow_id: str) -> None:
-        self._delete(f"/workflows/{quote(workflow_id, safe='')}")
+        """Delete; n8n 2.x refuses (409) while the workflow is published, so unpublish and retry."""
+        path = f"/workflows/{quote(workflow_id, safe='')}"
+        try:
+            self._delete(path)
+            return
+        except N8nError as exc:
+            if exc.status_code != 409:
+                raise
+        self.unpublish_workflow(workflow_id)
+        for wait in DELETE_RETRY_WAITS:
+            try:
+                self._delete(path)
+                return
+            except N8nError as exc:
+                if exc.status_code != 409:
+                    raise
+            self._sleep(wait)
+        self._delete(path)  # last try: its 409 is the error the caller reports
 
     def executions(self, workflow_id: str, limit: int = 10) -> list[dict[str, Any]]:
         """The latest executions, without their (large) data."""

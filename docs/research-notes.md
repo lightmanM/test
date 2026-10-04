@@ -16,6 +16,13 @@ re-checked when implementing. Check here before re-researching.
 - License FAQ (`n8n-docs/docs/n8n-community-license/license-faq.md`, verified): end users may connect their own accounts to pre-built workflows as long as they can't build/modify workflow logic; "automation-as-a-service" / competing automation products are not allowed. Applies to self-hosted; n8n Cloud has its own terms.
 - Workflow SDK: `@n8n/workflow-sdk` (npm, 0.34.2) — `workflow(...).toJSON()` compiles SDK code to importable JSON. Verified on the Meegle digest.
 
+- Self-hosted (chosen at P7): the public API is in every self-hosted edition (only the n8n Cloud free trial lacks it); Community Edition is free under the Sustainable Use License (internal business use); no run time limit. Docker: `docker.n8n.io/n8nio/n8n:<v>` + `n8nio/runners:<same v>` sidecar for Code nodes (`N8N_RUNNERS_MODE=external`, shared `N8N_RUNNERS_AUTH_TOKEN`, broker `http://n8n:5679`; internal mode is deprecated in 3.0) — n8n-io/n8n-hosting `docker-compose/withPostgres`. Stable 2.41.6 on 2026-10-04.
+- Headless first-run (verified in n8n@2.41.6 source): `POST /rest/owner/setup {email, firstName, lastName, password}` (password 8–64 chars with a digit and an uppercase letter) → session cookie; `GET /rest/api-keys/scopes`; `POST /rest/api-keys {label, scopes, expiresAt: null}` → `rawApiKey`. Used by `deploy/aws/setup_n8n.py`.
+
+## AWS (hosting since P7)
+- `pond-new` (account 4326…): us-east-2's On-Demand standard vCPU quota (8) is used by four t2.medium backends; the user can't read or raise quotas (`servicequotas:*` denied by a permissions boundary). us-west-2 had nothing running, so the server is there.
+- Let's Encrypt issues certificates for sslip.io names (`demo-1-2-3-4.sslip.io`) — Caddy obtained both on the first start.
+
 ## Make (GitHub → Slack workflow)
 - **OAuth connections can't be created with injected tokens**: Make's own guide says tokens "are **not** injectable — there is no way to skip the consent" (`integromat/make-skills`, `http-fallback-shells.md`). Verified.
 - **Make Bridge** (verified, `integromat/bridge-examples`): portal API at `https://<zone>.make.com/portal/api/bridge/...`; every call carries a JWT `{sub: <end user id>, jti}` signed with the Bridge secret (HS256, `kid` = key ID, ~2 min expiry). Endpoints: `POST /integrations/init/{templateId}` (body: `redirectUri`, `prefill{hard,soft}`, `allowReusingComponents`, `autoActivate`, `autoFinalize`, `scenario{name,enable}`) → `publicUrl` + `flow.id`; `GET /integrations/check-init/{flowId}` → scenario IDs; `POST /integrations/{scenarioId}/activate|deactivate|run`; `DELETE /integrations/{scenarioId}`; `GET /scenarios/{id}/logs`. End users connect accounts "without logging into Make". Templates: Make UI → Templates → "+ New Bridge template" (some accounts don't show it).
@@ -31,8 +38,9 @@ re-checked when implementing. Check here before re-researching.
 - Refreshes every token at least once every 24 h (verified, `docs/guides/auth/token-refreshing.mdx`). Never hand rotating refresh tokens to another system.
 - Free plan: 10 connections, 2 environments (verified, `plans/definitions.ts`); Pay-as-you-go $50/month (credits), $0.29/connection.
 - Providers: `slack`, `google`, `google-mail`, `google-sheet` exist; **Meegle/Feishu/Lark not supported**. Own OAuth app required to export tokens. Cloud OAuth callback: `https://api.nango.dev/oauth/callback`.
+- A refresh the provider refuses (e.g. Google `invalid_grant` after 7 days) → `GET /connections/{id}` answers `{"error": {"code": "invalid_credentials", …}}`, status taken from the refresh error (400 for Google); the only fix is reconnecting. Verified in `NangoHQ/nango` `packages/server/lib/controllers/connection/connectionId/getConnection.ts`.
 
-## Modal (demo hosting + shared services)
+## Modal (original hosting plan; replaced by AWS at P7)
 - Deploy: `modal deploy` / `app.deploy()` (Python SDK only); `modal.Secret.objects.create`, `.update`; environments; `modal app stop`; `app rollover` to restart after secret changes.
 - `Image.from_dockerfile(path, add_python=...)` and `@modal.web_server(port)` exist (verified in modal 1.6.1) → can run the team's Node/Chromium reader service.
 - Functions max 24 h per run; schedules via `modal.Period` / `modal.Cron`; containers have no persistent disk (use DB/Volume).
@@ -43,7 +51,9 @@ re-checked when implementing. Check here before re-researching.
 - OAuth with `incoming-webhook` scope returns `incoming_webhook.url` (channel chosen by the user); `authed_user.id` identifies the installing user.
 
 ## Google
-- Internal OAuth app: only the company Workspace's accounts, no test-user cap, no 7-day token expiry. Gmail read scopes are "restricted" (matters only for External apps).
+- Internal OAuth app: only the accounts of the one Cloud organization the project belongs to, no test-user cap, no 7-day token expiry. Gmail read scopes are "restricted" (matters only for External apps).
+- External + "Testing" (chosen): up to 100 test users, added one by one (no domain wildcard); an "unverified app" notice before consent; consent and refresh tokens end 7 days after consent; other accounts get "access denied". External + "In production" unverified: any account, a stronger warning, 100 users over the project's lifetime. Workspace admins can still block unverified apps from Gmail. Source: Google Cloud help "Manage App Audience" / "Unverified apps".
+- n8n Cloud's "Managed OAuth2" (Sign in with Google) uses n8n's own verified Google app; it only works inside the n8n editor for a logged-in n8n user and its client secret isn't exposed, so the demo (API-created credentials, testers aren't n8n users) can't use it.
 
 ## Meegle
 - OpenAPI: `POST /open_api/authen/plugin_token {plugin_id, plugin_secret, type}` → token (~2 h); calls send `X-PLUGIN-TOKEN` + `X-USER-KEY`.
