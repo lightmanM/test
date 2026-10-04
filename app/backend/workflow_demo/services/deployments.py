@@ -170,7 +170,15 @@ def _queue_job(
     job = Job(deployment_id=dep.id, kind=kind, payload=payload or {})
     db.add(job)
     db.commit()
-    svc.runner.submit(job.id)
+    try:
+        svc.runner.submit(job.id)
+    except Exception as exc:  # noqa: BLE001 - e.g. the job platform refused the call
+        # Don't leave the deployment busy until the sweeper notices: fail it now so it can be retried.
+        log.exception("couldn't start job %s", job.id)
+        job.status, job.error, job.finished_at = "failed", f"not started: {exc!r}", utcnow()
+        _fail(dep, "Couldn't start the background job; try again")
+        db.commit()
+        raise DeploymentError("Couldn't start the background job; try again", 503) from None
     db.refresh(dep)
 
 

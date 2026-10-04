@@ -140,7 +140,7 @@ function AdminTools() {
           </Button>
         </div>
         <p className="mt-2 text-xs text-slate-500">
-          Runs every 10 minutes: stops deployments past their 24 h limit or with an unfinished popup, recovers lost
+          Runs on a schedule: stops deployments past their 24 h limit or with an unfinished popup, recovers lost
           jobs and (with ORPHAN_SWEEP on) removes demo items on n8n and Make that no deployment uses.
         </p>
         <ErrorNote error={sweep.error} />

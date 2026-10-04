@@ -175,3 +175,29 @@ def test_database_settings_read_dotenv(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text("DATABASE_URL=postgresql://neon.example/db\n")
     assert DatabaseSettings().database_url == "postgresql://neon.example/db"
+
+
+def test_job_that_cant_start_fails_at_once(make_settings):
+    from fastapi.testclient import TestClient
+
+    from workflow_demo.app import create_app
+
+    class Refusing:
+        def __init__(self, run):
+            pass
+
+        def submit(self, job_id):
+            raise RuntimeError("job platform unavailable")
+
+    svc = build_services(make_settings(recover_jobs_on_startup=False), runner_factory=Refusing)
+    svc.db.create_all()
+    with TestClient(create_app(svc.settings, svc)) as client:
+        client.post("/api/auth/login", json={"username": "alice", "passcode": "pass"})
+        for connector in ("google", "slack"):
+            client.post(f"/api/connections/{connector}/fake")
+        resp = client.post("/api/deployments/uptime-monitor", json={"settings": UPTIME})
+        assert resp.status_code == 503
+        dep = deployment(svc)
+        assert dep.status == "failed" and "try again" in dep.error
+        with svc.db.session() as db:
+            assert db.query(Job).one().status == "failed"

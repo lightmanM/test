@@ -167,10 +167,13 @@ Admin page: setup check, "Run sweeper now", Stop per deployment.
 - [x] E2E: admin setup check, sweeper, stop
 
 ### P7 Go live
-Notes: `deploy/modal_app.py` — the demo on Modal: `web` (ASGI, FastAPI + built SPA, `@modal.concurrent`), `run_job`
-(one function call per deploy job via `ModalJobRunner` → survives web scale-down), `sweeper` (cron every 10 min;
-web containers run with `SWEEP_INTERVAL_SECONDS=0` and `RECOVER_JOBS_ON_STARTUP=false` since several share the DB),
-`migrate` (`alembic upgrade head`). Settings come from the Modal secret `workflow-demo-app`
+Notes: `deploy/modal_app.py` — the demo on Modal: `web` (ASGI, FastAPI + built SPA, `@modal.concurrent`), `Jobs.run`
+(one function call per deploy job via `ModalJobRunner` → survives web scale-down; services built once per container
+with `@modal.enter`, DB pool disposed on exit), `sweeper` (cron every 30 min, so Neon can suspend; the Modal entrypoints
+force `recover_jobs_on_startup=False` and `sweep_interval_seconds=0` in code since several containers share the DB),
+`migrate` (`alembic upgrade head`, via `MIGRATION_DATABASE_URL` = Neon's direct URL if set). Containers refuse a
+non-Postgres `DATABASE_URL`. A job that can't be started fails its deployment at once (503) instead of leaving it
+busy. Settings come from the Modal secret `workflow-demo-app`
 (`deploy/production.env.example`, `ORPHAN_SWEEP=true`). Step-by-step: `docs/go-live.md`.
 - [x] Modal app for the demo (web, jobs, sweeper, migrate) + production settings template + go-live guide
 - [ ] Owner credentials configured; services and demo deployed; setup check green (needs the owner, §15)
@@ -194,7 +197,7 @@ web containers run with `SWEEP_INTERVAL_SECONDS=0` and `RECOVER_JOBS_ON_STARTUP=
 | 2026-10-04 | Leaked Meegle token removed from git history (2 commits rewritten; `main` now at e7c40dc). Owner to revoke the token in Meegle. |
 
 ## Session log
-- 2026-10-04: PR #8 (P6) merged. P7 packaging: Modal app for the demo, production settings template, go-live guide.
+- 2026-10-04: PR #8 (P6) merged. P7 packaging: Modal app for the demo, production settings template, go-live guide; reviewed (10 findings fixed), 157 backend tests.
 - 2026-10-04: PR #7 (P5) merged. P6 implemented and reviewed (10 findings fixed): 156 backend tests, 5 E2E (admin lifecycle).
 - 2026-10-04: PR #6 (P4) merged. P5 implemented and reviewed (10 findings fixed): 143 backend tests (Bridge client + adapter contract, API popup flow).
 - 2026-10-04: PR #5 (P3) merged. P4 implemented and reviewed (8 findings fixed): 127 backend tests, 3 bot Node tests, 5 E2E.

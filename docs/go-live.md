@@ -38,7 +38,7 @@ modal deploy services/medium-reader/modal_app.py      # → READER_BASE_URL
 cp deploy/production.env.example deploy/production.env   # fill in (git-ignored)
 (cd app/frontend && npm ci && npm run build)
 modal secret create workflow-demo-app --from-dotenv deploy/production.env
-modal run deploy/modal_app.py::migrate                    # creates the tables on Neon
+modal run deploy/modal_app.py::migrate                    # creates the tables on Neon (direct URL)
 modal deploy deploy/modal_app.py                          # → the web URL
 ```
 
@@ -62,10 +62,12 @@ Admin page (`/admin`) → **Run setup check**: every line ✓ and every workflow
 - [ ] **GitHub merge → Slack**: Deploy → Make popup (GitHub, Slack, repo, channel) → Active; merge a PR,
       Run now → diff in Slack, run listed. Check the run's details look right (log field names are inferred).
 - [ ] **Slack bot**: Activate for me; `@bot Fix login page error @you` → card + thread reply; card listed.
-- [ ] Redeploy and delete one of each; n8n and Make keep nothing behind (Run sweeper now reports nothing).
+- [ ] Redeploy and delete one of each; n8n and Make keep nothing behind (Run sweeper now removes nothing).
 - [ ] Two users deploy the same workflow independently.
-- [ ] Expiry: set `DEPLOYMENT_TTL_HOURS=0.05`, deploy, wait for the sweeper (≤10 min) → Stopped
-      "after the demo time limit"; set it back to `24`.
+- [ ] Expiry: set `DEPLOYMENT_TTL_HOURS=0.05` in the secret and run `modal deploy deploy/modal_app.py`
+      again (running containers keep the old value until then); deploy a workflow, wait 3 minutes, then
+      admin page → **Run sweeper now** (the schedule runs every 30 min) → Stopped "after the demo time
+      limit". Set it back to `24` and redeploy the app the same way.
 
 ## 7. Hand over
 
