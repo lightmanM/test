@@ -61,3 +61,27 @@ def test_cookie_for_another_username_is_rejected(client, login, services):
     forged = services.signer.dumps({"uid": 1, "username": "mallory"}, "wd_session")
     client.cookies.set("wd_session", forged)
     assert client.get("/api/me").status_code == 401
+
+
+def test_frontend_is_served_with_spa_fallback(tmp_path, make_settings, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from workflow_demo import paths
+    from workflow_demo.app import build_services, create_app, mount_frontend
+
+    monkeypatch.setattr(paths, "FRONTEND_DIST", tmp_path / "no-build")
+
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<div id=root></div>")
+    (dist / "assets" / "app.js").write_text("console.log(1)")
+    (dist / "favicon.svg").write_text("<svg/>")
+    svc = build_services(make_settings())
+    app = create_app(svc.settings, svc)
+    mount_frontend(app, dist)
+    client = TestClient(app)
+    assert client.get("/workflows/uptime-monitor").text == "<div id=root></div>"
+    assert client.get("/assets/app.js").text == "console.log(1)"
+    assert client.get("/favicon.svg").text == "<svg/>"
+    assert client.get("/../secret").status_code in (200, 404)  # never escapes dist
+    assert client.get("/api/nope").status_code == 404

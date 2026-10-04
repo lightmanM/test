@@ -5,9 +5,13 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 from datetime import timedelta
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
+from workflow_demo import paths
 from workflow_demo.adapters.registry import AdapterRegistry, fake_registry
 from workflow_demo.api import admin, auth, connections, deployments, user_steps, workflows
 from workflow_demo.catalog.loader import load_catalog
@@ -63,4 +67,28 @@ def create_app(settings: Settings | None = None, services: AppServices | None = 
     def health() -> dict:
         return {"status": "ok", "fake_platforms": svc.settings.fake_platforms}
 
+    mount_frontend(app, paths.FRONTEND_DIST)
     return app
+
+
+SERVER_PREFIXES = ("api/", "make/", "fake/")
+
+
+def mount_frontend(app: FastAPI, dist: Path) -> None:
+    """Serve the built React app (``npm run build``) with client-side routing fallback."""
+    index = dist / "index.html"
+    if not index.exists():
+        log.info("frontend build not found at %s; serving the API only", dist)
+        return
+    if (dist / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=dist / "assets"), name="assets")
+    root = dist.resolve()
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def spa(path: str) -> FileResponse:
+        if path.startswith(SERVER_PREFIXES):
+            raise HTTPException(404)
+        candidate = (dist / path).resolve()
+        if path and candidate.is_file() and candidate.is_relative_to(root):
+            return FileResponse(candidate)
+        return FileResponse(index)

@@ -6,6 +6,7 @@ Creates the SQLite tables directly; deployed databases use ``alembic upgrade hea
 from __future__ import annotations
 
 import logging
+import os
 
 import uvicorn
 
@@ -19,7 +20,7 @@ def main() -> None:
     svc = build_services(settings)
     if settings.database_url.startswith("sqlite"):
         svc.db.create_all()
-    uvicorn.run(create_app(settings, svc), host="127.0.0.1", port=8000)
+    uvicorn.run(create_app(settings, svc), host="127.0.0.1", port=int(os.environ.get("PORT", "8000")))
 
 
 if __name__ == "__main__":
