@@ -1,0 +1,123 @@
+[
+  {
+    "key": "POND-1024",
+    "type": "bug",
+    "title": "支付回调偶发超时导致订单状态未更新",
+    "priority": "P0",
+    "status": "进行中",
+    "assignee": "张工",
+    "created_at": "2026-09-28T09:12:00+08:00",
+    "updated_at": "2026-09-29T10:41:00+08:00",
+    "blocked": false
+  },
+  {
+    "key": "POND-1025",
+    "type": "bug",
+    "title": "任务列表页筛选条件下拉框错位（Safari）",
+    "priority": "P2",
+    "status": "待处理",
+    "assignee": "王小美",
+    "created_at": "2026-09-29T11:05:00+08:00",
+    "updated_at": "2026-09-29T11:05:00+08:00",
+    "blocked": false
+  },
+  {
+    "key": "POND-1026",
+    "type": "bug",
+    "title": "注册接口未校验邮箱重复，产生脏数据",
+    "priority": "P1",
+    "status": "进行中",
+    "assignee": "李雷",
+    "created_at": "2026-09-29T14:22:00+08:00",
+    "updated_at": "2026-09-29T16:30:00+08:00",
+    "blocked": false
+  },
+  {
+    "key": "POND-1027",
+    "type": "bug",
+    "title": "导出 CSV 超 1 万行时内存溢出",
+    "priority": "P1",
+    "status": "待处理",
+    "assignee": "未分配",
+    "created_at": "2026-09-29T17:48:00+08:00",
+    "updated_at": "2026-09-29T17:48:00+08:00",
+    "blocked": false
+  },
+  {
+    "key": "POND-1028",
+    "type": "bug",
+    "title": "头像上传超过 5MB 无报错提示",
+    "priority": "P3",
+    "status": "已关闭",
+    "assignee": "王小美",
+    "created_at": "2026-09-29T09:02:00+08:00",
+    "updated_at": "2026-09-29T15:20:00+08:00",
+    "blocked": false
+  },
+  {
+    "key": "POND-1029",
+    "type": "bug",
+    "title": "后台公告编辑器的预览与实际样式不一致",
+    "priority": "P2",
+    "status": "已关闭",
+    "assignee": "韩梅梅",
+    "created_at": "2026-09-28T16:40:00+08:00",
+    "updated_at": "2026-09-29T10:15:00+08:00",
+    "blocked": false
+  },
+  {
+    "key": "POND-1011",
+    "type": "bug",
+    "title": "第三方物流回传状态码与文档不符，等上游提供 Mock 数据",
+    "priority": "P1",
+    "status": "阻塞",
+    "assignee": "李雷",
+    "created_at": "2026-09-25T10:00:00+08:00",
+    "updated_at": "2026-09-26T09:30:00+08:00",
+    "blocked": true
+  },
+  {
+    "key": "POND-2201",
+    "type": "story",
+    "title": "任务列表支持批量导出",
+    "priority": "P1",
+    "status": "进行中",
+    "assignee": "韩梅梅",
+    "created_at": "2026-09-22T09:00:00+08:00",
+    "updated_at": "2026-09-29T18:02:00+08:00",
+    "blocked": false
+  },
+  {
+    "key": "POND-2202",
+    "type": "story",
+    "title": "接入 Slack 告警通道，替换现有邮件告警",
+    "priority": "P2",
+    "status": "待评审",
+    "assignee": "Orville",
+    "created_at": "2026-09-29T10:11:00+08:00",
+    "updated_at": "2026-09-29T10:11:00+08:00",
+    "blocked": false
+  },
+  {
+    "key": "POND-2203",
+    "type": "story",
+    "title": "登录页支持企业微信扫码",
+    "priority": "P2",
+    "status": "已完成",
+    "assignee": "张工",
+    "created_at": "2026-09-20T14:00:00+08:00",
+    "updated_at": "2026-09-29T11:47:00+08:00",
+    "blocked": false
+  },
+  {
+    "key": "POND-2204",
+    "type": "story",
+    "title": "数据看板增加周环比指标",
+    "priority": "P2",
+    "status": "阻塞",
+    "assignee": "王小美",
+    "created_at": "2026-09-21T10:00:00+08:00",
+    "updated_at": "2026-09-26T15:00:00+08:00",
+    "blocked": true
+  }
+]

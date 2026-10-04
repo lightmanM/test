@@ -1,0 +1,735 @@
+{
+  "name": "Host your own uptime monitoring with scheduled triggers",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "acb0acd0-9bb6-4491-a1ca-4aa9a7820bbc",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [
+        752,
+        512
+      ],
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b0cbcff5-bfcf-46a5-a386-65c4dd56c42f",
+              "name": "date",
+              "type": "string",
+              "value": "={{ $json.headers.date }}"
+            },
+            {
+              "id": "8c4155e4-bcc6-41dd-9582-346a57a7b997",
+              "name": "Property",
+              "type": "string",
+              "value": "={{ $json.Property }}"
+            },
+            {
+              "id": "f0320678-d352-486f-a633-9980c4fc73b2",
+              "name": "UP_FROM_UP",
+              "type": "boolean",
+              "value": "={{ $json.statusCode < 400 && $json.Status === 'UP' }}"
+            },
+            {
+              "id": "61783eb6-a683-44c9-aa0c-5fc5247da9fa",
+              "name": "DOWN_FROM_DOWN",
+              "type": "boolean",
+              "value": "={{ $json.statusCode >= 400 && $json.Status === 'DOWN' }}"
+            },
+            {
+              "id": "1052a69e-4456-445d-bdd9-2765b334cf64",
+              "name": "UP_FROM_DOWN",
+              "type": "boolean",
+              "value": "={{ $json.statusCode < 400 && $json.Status === 'DOWN' }}"
+            },
+            {
+              "id": "9af72278-5b29-406a-b4c5-f47f3d805063",
+              "name": "DOWN_FROM_UP",
+              "type": "boolean",
+              "value": "={{ $json.statusCode >= 400 && $json.Status === 'UP' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c6bb51c4-aec4-4a6d-ade2-1080bbbb6fb3",
+      "name": "Calculate Status",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        2064,
+        544
+      ],
+      "typeVersion": 3.3
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1cQfw8icdNm7HRkpKVwh2XnqjInbmnA7KlcyEHvyfSQo",
+          "mode": "list",
+          "cachedResultName": "website-monitoring",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1cQfw8icdNm7HRkpKVwh2XnqjInbmnA7KlcyEHvyfSQo/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1cQfw8icdNm7HRkpKVwh2XnqjInbmnA7KlcyEHvyfSQo/edit#gid=0"
+        },
+        "options": {}
+      },
+      "id": "50307dca-fa88-4a19-91a4-456866e529d4",
+      "name": "Get Sites",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        1008,
+        512
+      ],
+      "typeVersion": 4.3,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "4OMRHmaCcnPLEl0L",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "C0C5PTQLS9Z",
+          "mode": "list",
+          "cachedResultName": "pond-website-monitoring"
+        },
+        "text": "=From: n8n uptime\nDate: {{ $('Calculate Status').item.json[\"date\"] }}\n\n{{ $('Calculate Status').item.json.Property }} is {{ $('Calculate Status').item.json[\"DOWN_FROM_UP\"] ? 'DOWN' : 'UP' }}",
+        "otherOptions": {}
+      },
+      "id": "4b0cb0cc-282b-4be9-a4ca-0c4eb10d896e",
+      "name": "Send Chat Alert",
+      "type": "n8n-nodes-base.slack",
+      "position": [
+        2800,
+        432
+      ],
+      "typeVersion": 2.1,
+      "webhookId": "5a411a3b-239d-4250-8263-5e863bc6c9cc",
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "zitjx1nycWiBJHYv",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1cQfw8icdNm7HRkpKVwh2XnqjInbmnA7KlcyEHvyfSQo",
+          "mode": "list",
+          "cachedResultName": "website-monitoring",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1cQfw8icdNm7HRkpKVwh2XnqjInbmnA7KlcyEHvyfSQo/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 417320686,
+          "mode": "list",
+          "cachedResultName": "Sheet2",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1cQfw8icdNm7HRkpKVwh2XnqjInbmnA7KlcyEHvyfSQo/edit#gid=417320686"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Property",
+              "displayName": "Property",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "UP_FROM_UP",
+              "displayName": "UP_FROM_UP",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "DOWN_FROM_DOWN",
+              "displayName": "DOWN_FROM_DOWN",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "UP_FROM_DOWN",
+              "displayName": "UP_FROM_DOWN",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "DOWN_FROM_UP",
+              "displayName": "DOWN_FROM_UP",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "63343e68-be07-4d89-8363-140299dcf0b6",
+      "name": "Log Uptime Event",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        2640,
+        608
+      ],
+      "typeVersion": 4.3,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "4OMRHmaCcnPLEl0L",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1cQfw8icdNm7HRkpKVwh2XnqjInbmnA7KlcyEHvyfSQo",
+          "mode": "list",
+          "cachedResultName": "website-monitoring",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1cQfw8icdNm7HRkpKVwh2XnqjInbmnA7KlcyEHvyfSQo/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 515880790,
+          "mode": "list",
+          "cachedResultName": "Sheet3",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1cQfw8icdNm7HRkpKVwh2XnqjInbmnA7KlcyEHvyfSQo/edit#gid=515880790"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "matchingColumns": "email"
+          },
+          "matchingColumns": [
+            "matchingColumns"
+          ],
+          "schema": [
+            {
+              "id": "matchingColumns",
+              "displayName": "matchingColumns",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "fe97a18b-902c-4fab-bf73-69b5b9e41a11",
+      "name": "Update Site Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        2800,
+        608
+      ],
+      "typeVersion": 4.3,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "4OMRHmaCcnPLEl0L",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.Property }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "b37537d1-eedf-446e-a5ed-2ef7388fd7bc",
+      "name": "Perform Site Test",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1520,
+        544
+      ],
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "batchSize": 100,
+        "options": {}
+      },
+      "id": "22efcca8-81a8-4128-a03f-efd394e41977",
+      "name": "For Each Site...",
+      "type": "n8n-nodes-base.splitInBatches",
+      "position": [
+        1312,
+        544
+      ],
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "content": "## 1. Setting a Schedule\n[Read more about Scheduling Workflows](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.scheduletrigger/)\n\nSince we expect downtime to be a rare occurance, our monitor should only check infrequently during the day. We'll use a schedule trigger for this purpose.\n\nOnce the schdule activates, we'll pull a list of sites to check from our google sheet.",
+        "height": 451.46281790887826,
+        "width": 533.3167991131336,
+        "color": 7
+      },
+      "id": "b74d0b2c-8b08-42fe-a78f-103d4ea3b60f",
+      "name": "Sticky Note3",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        688,
+        240
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "## 2. Perform Site Checks\n[Read more about using HTTP requests](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.httprequest/)\n\nn8n makes it easy to communicate with external websites by offering a powerful HTTP request node which can handle GET and POST requests as well as pagination.\n\nHere, we're only interested in the status code of our requests.",
+        "height": 464.2968162619932,
+        "width": 932,
+        "color": 7
+      },
+      "id": "6c570ff2-aa08-4458-b2da-7632d516c4e3",
+      "name": "Sticky Note4",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1248,
+        336
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "## 3. Sending Alerts and Logging Results\n[Read more about using Switch for powerful control flow](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.switch)\n\nThe switch node is powerful control flow tool that makes your workflows smart. Here, we're able to use Switch to trigger alert notifications whenever we have DOWN status or whenever we get a status change.\n\nWe store the event in our Sites Google Sheet and update the site's status which will be used to calculate our state on the next scheduled run.",
+        "height": 600.2604061412927,
+        "width": 720.3351531809235,
+        "color": 7
+      },
+      "id": "d1f67650-1409-43b1-b197-0e5a821d8b6f",
+      "name": "Sticky Note5",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        2272,
+        208
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "leftValue": "={{ $json.UP_FROM_UP }}",
+                    "rightValue": 200
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "UP_FROM_UP"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "f50ae8d6-4359-4163-aedb-fddf100ad676",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "leftValue": "={{ $json.UP_FROM_DOWN }}",
+                    "rightValue": 200
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "UP_FROM_DOWN"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "417e93d8-08b7-468d-a3bb-f0d395b3026a",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "leftValue": "={{ $json.DOWN_FROM_DOWN }}",
+                    "rightValue": ""
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "DOWN_FROM_DOWN"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "7191e7cb-f2e1-4288-aa68-21f6efefafc5",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "leftValue": "={{ $json.DOWN_FROM_UP }}",
+                    "rightValue": ""
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "DOWN_FROM_UP"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "244291de-7ce1-48c9-9d7a-c04fc7d069ab",
+      "name": "Status Router",
+      "type": "n8n-nodes-base.switch",
+      "position": [
+        2336,
+        608
+      ],
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "content": "## Try It Out!\n### Thie workflow showcases how you can build a simple website monitoring service using Scheduled Triggers and the HTTP Requests node. \n\n### Need Help?\nJoin the [Discord](https://discord.com/invite/XPKeKXeB7d) or ask in the [Forum](https://community.n8n.io/)!\n\nHappy Hacking!",
+        "height": 299.942498076894,
+        "width": 276.590892958905
+      },
+      "id": "a2a683fa-1fa5-4595-856a-de4f717eadf0",
+      "name": "Sticky Note6",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        368,
+        240
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n### 🚨Google Sheet Required!\nYou'll need the following columns:\n* **Property** - the website address to monitor\n* **Status** - either one of \"UP\" or \"DOWN\"",
+        "height": 379.4991553144906,
+        "width": 262.6069985025353
+      },
+      "id": "704ce21f-6b96-4dc5-a27f-fca4b326efd1",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        928,
+        464
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "sendTo": "depp@cryptopond.xyz",
+        "subject": "=n8n uptime: {{ $('Calculate Status').item.json.Property }} is {{ $('Calculate Status').item.json[\"DOWN_FROM_UP\"] ? 'DOWN' : 'UP' }}",
+        "emailType": "text",
+        "message": "=From: n8n uptime\nDate: {{ $('Calculate Status').item.json[\"date\"] }}\n\n{{ $('Calculate Status').item.json.Property }} is {{ $('Calculate Status').item.json[\"DOWN_FROM_UP\"] ? 'DOWN' : 'UP' }}",
+        "options": {
+          "appendAttribution": false,
+          "senderName": "n8n uptime"
+        }
+      },
+      "id": "7d3250a9-4310-4774-bcb3-750ede34614f",
+      "name": "Send Email Alert1",
+      "type": "n8n-nodes-base.gmail",
+      "position": [
+        2432,
+        432
+      ],
+      "typeVersion": 2.1,
+      "webhookId": "e73dd32d-4696-43b3-bb8c-69799187b48e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "FlPke6sM3KxKDN3h",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1744,
+        544
+      ],
+      "id": "0d948a98-da1a-4912-b69e-24c9d31f66e8",
+      "name": "Merge"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Get Sites": {
+      "main": [
+        [
+          {
+            "node": "For Each Site...",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status Router": {
+      "main": [
+        [
+          {
+            "node": "Log Uptime Event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Uptime Event",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Chat Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Uptime Event",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Chat Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Uptime Event",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Chat Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Status": {
+      "main": [
+        [
+          {
+            "node": "Status Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "For Each Site...": {
+      "main": [
+        null,
+        [
+          {
+            "node": "Perform Site Test",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Log Uptime Event": {
+      "main": [
+        [
+          {
+            "node": "Update Site Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Sites",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Perform Site Test": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Site Status": {
+      "main": [
+        [
+          {
+            "node": "For Each Site...",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Calculate Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "e64f5ad2-b366-47af-b7cf-60fae241cc83",
+  "meta": {
+    "templateId": "2327",
+    "templateCredsSetupCompleted": true,
+    "instanceId": "27934dd1b289483f1b9af6360a16eba5625155ae5206f2eb6630f0f4fbd595d6"
+  },
+  "nodeGroups": [],
+  "id": "vhGGBJvFDwX2TQu2",
+  "tags": []
+}

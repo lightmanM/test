@@ -1,0 +1,18 @@
+{
+  "name": "slack-meegle-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Slack bot: 被 @ 时自动在 Meegle 创建卡片",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node --env-file=.env src/index.js",
+    "inspect": "node --env-file=.env scripts/inspect.js",
+    "test-create": "node --env-file=.env scripts/test-create.js"
+  },
+  "engines": {
+    "node": ">=20.6"
+  },
+  "dependencies": {
+    "@slack/bolt": "^4.2.0"
+  }
+}
