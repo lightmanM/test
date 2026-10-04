@@ -27,8 +27,6 @@ function RequireUser({ children }: { children: (username: string) => ReactNode }
 }
 
 export default function App() {
-  const health = useQuery({ queryKey: ['health'], queryFn: api.health, staleTime: Infinity })
-  const fakeMode = !!health.data?.fake_platforms
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
@@ -41,7 +39,7 @@ export default function App() {
         }
       />
       <Route path="/" element={<RequireUser>{() => <CatalogPage />}</RequireUser>} />
-      <Route path="/workflows/:id" element={<RequireUser>{() => <WorkflowPage fakeMode={fakeMode} />}</RequireUser>} />
+      <Route path="/workflows/:id" element={<RequireUser>{() => <WorkflowPage />}</RequireUser>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

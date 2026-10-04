@@ -14,7 +14,7 @@ from workflow_demo.api.schemas import (
     WorkflowSummary,
 )
 from workflow_demo.catalog.models import ConnectorKind, Platform, WorkflowEntry
-from workflow_demo.db import Deployment
+from workflow_demo.db import Connection, Deployment, User
 from workflow_demo.services import deployments as svc_deployments
 from workflow_demo.services.container import AppServices
 from workflow_demo.services.states import Status
@@ -40,11 +40,16 @@ def deployment_out(dep: Deployment | None, with_events: bool = False) -> Deploym
     )
 
 
-def summary(svc: AppServices, entry: WorkflowEntry, connected: set[str]) -> dict:
+def active_connections(user: User) -> dict[str, Connection]:
+    return {c.connector: c for c in user.connections if c.status == "active"}
+
+
+def summary(svc: AppServices, entry: WorkflowEntry, active: dict[str, Connection]) -> dict:
     connectors = []
     for wc in entry.connectors:
         connector = svc.catalog.connectors[wc.id]
         by_platform = connector.kind is ConnectorKind.PLATFORM_POPUP
+        record = active.get(wc.id)
         connectors.append(
             ConnectorStatus(
                 id=connector.id,
@@ -53,7 +58,9 @@ def summary(svc: AppServices, entry: WorkflowEntry, connected: set[str]) -> dict
                 description=connector.description,
                 purpose=wc.purpose,
                 help=connector.help,
-                connected=wc.id in connected,
+                connected=record is not None,
+                label=(record.details or {}).get("label") if record is not None else None,
+                secret=connector.secret,
                 managed_by_platform=by_platform,
             )
         )
@@ -65,7 +72,7 @@ def summary(svc: AppServices, entry: WorkflowEntry, connected: set[str]) -> dict
         "platform": entry.platform.value,
         "available": avail.available,
         "unavailable_reason": avail.reason,
-        "ready": not svc_deployments.missing_connectors(svc, entry, connected),
+        "ready": not svc_deployments.missing_connectors(svc, entry, set(active)),
         "connectors": connectors,
     }
 
@@ -73,9 +80,9 @@ def summary(svc: AppServices, entry: WorkflowEntry, connected: set[str]) -> dict
 @router.get("/workflows", response_model=list[WorkflowSummary])
 def list_workflows(svc: Services, db: DB, user: CurrentUser) -> list[WorkflowSummary]:
     deps = {d.workflow_id: d for d in user.deployments}
-    connected = svc_deployments.active_connectors(user)
+    active = active_connections(user)
     return [
-        WorkflowSummary(**summary(svc, entry, connected), deployment=deployment_out(deps.get(entry.id)))
+        WorkflowSummary(**summary(svc, entry, active), deployment=deployment_out(deps.get(entry.id)))
         for entry in svc.catalog.workflows
     ]
 
@@ -88,7 +95,7 @@ def get_workflow(workflow_id: str, svc: Services, db: DB, user: CurrentUser) -> 
         raise HTTPException(404, "Unknown workflow") from None
     dep = svc_deployments.get_deployment(db, user, workflow_id)
     return WorkflowDetail(
-        **summary(svc, entry, svc_deployments.active_connectors(user)),
+        **summary(svc, entry, active_connections(user)),
         deployment=deployment_out(dep, with_events=True),
         description=entry.description,
         settings=[SettingOut(**s.model_dump(mode="json")) for s in entry.settings],

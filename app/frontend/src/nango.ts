@@ -1,0 +1,44 @@
+import { api } from './api'
+
+/**
+ * Open Nango's Connect UI for one connector and save the resulting connection.
+ * Resolves true once the connection is stored, false if the user closed the dialog first.
+ */
+export async function connectWithNango(connector: string): Promise<boolean> {
+  // Loaded on demand: most visits never open the dialog.
+  const { default: Nango } = await import('@nangohq/frontend')
+  return new Promise((resolve, reject) => {
+    let settled = false
+    let saving = false
+    const finish = (fn: () => void) => {
+      if (!settled) {
+        settled = true
+        fn()
+      }
+    }
+    // Open first so the dialog appears immediately; the session token follows.
+    const ui = new Nango().openConnectUI({
+      onEvent: async (event) => {
+        if (event.type === 'connect') {
+          saving = true
+          try {
+            await api.completeSession(connector, event.payload.connectionId)
+            finish(() => resolve(true))
+          } catch (err) {
+            ui.close()
+            finish(() => reject(err))
+          }
+        } else if (event.type === 'close' && !saving) {
+          finish(() => resolve(false))
+        }
+      },
+    })
+    api.startSession(connector).then(
+      (session) => ui.setSessionToken(session.token),
+      (err) => {
+        ui.close()
+        finish(() => reject(err))
+      },
+    )
+  })
+}

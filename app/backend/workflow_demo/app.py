@@ -16,7 +16,9 @@ from workflow_demo.adapters.registry import AdapterRegistry, fake_registry
 from workflow_demo.api import admin, auth, connections, deployments, user_steps, workflows
 from workflow_demo.catalog.loader import load_catalog
 from workflow_demo.config import Settings, get_settings
+from workflow_demo.crypto import SecretBox
 from workflow_demo.db import Database
+from workflow_demo.nango import NangoClient
 from workflow_demo.security import Signer
 from workflow_demo.services import deployments as svc_deployments
 from workflow_demo.services.container import AppServices
@@ -38,6 +40,14 @@ def build_services(
         catalog=load_catalog(),
         registry=registry or AdapterRegistry({}),
         signer=Signer(settings.session_secret.get_secret_value()),
+        nango=(
+            NangoClient(settings.nango_secret_key.get_secret_value(), settings.nango_host)
+            if settings.nango_secret_key
+            else None
+        ),
+        secret_box=SecretBox(settings.data_encryption_key.get_secret_value())
+        if settings.data_encryption_key
+        else None,
     )
     if registry is None and settings.fake_platforms:
         svc.registry = fake_registry(lambda state: f"{settings.base_url}/fake/make-popup?state={state}")
@@ -65,7 +75,11 @@ def create_app(settings: Settings | None = None, services: AppServices | None = 
 
     @app.get("/api/health")
     def health() -> dict:
-        return {"status": "ok", "fake_platforms": svc.settings.fake_platforms}
+        return {
+            "status": "ok",
+            "fake_platforms": svc.settings.fake_platforms,
+            "nango_enabled": svc.nango is not None,
+        }
 
     mount_frontend(app, paths.FRONTEND_DIST)
     return app

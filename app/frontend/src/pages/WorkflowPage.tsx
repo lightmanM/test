@@ -9,7 +9,7 @@ import { SettingsForm } from '../components/SettingsForm'
 import { ErrorNote, PlatformBadge, Section } from '../components/ui'
 import { formValue, settingsFromForm } from '../format'
 
-export function WorkflowPage({ fakeMode }: { fakeMode: boolean }) {
+export function WorkflowPage() {
   const { id = '' } = useParams()
   const workflow = useQuery({
     queryKey: ['workflow', id],
@@ -18,10 +18,10 @@ export function WorkflowPage({ fakeMode }: { fakeMode: boolean }) {
   })
   if (workflow.error) return <ErrorNote error={workflow.error} />
   if (!workflow.data) return <p className="text-sm text-slate-500">Loading…</p>
-  return <WorkflowView workflow={workflow.data} fakeMode={fakeMode} />
+  return <WorkflowView workflow={workflow.data} />
 }
 
-function WorkflowView({ workflow, fakeMode }: { workflow: WorkflowDetail; fakeMode: boolean }) {
+function WorkflowView({ workflow }: { workflow: WorkflowDetail }) {
   const initial = () =>
     Object.fromEntries(
       workflow.settings.map((s) => [s.key, formValue(workflow.deployment?.settings?.[s.key] ?? s.default, s.type)]),
@@ -48,7 +48,7 @@ function WorkflowView({ workflow, fakeMode }: { workflow: WorkflowDetail; fakeMo
         <p className="mt-2 max-w-3xl whitespace-pre-line text-sm text-slate-600">{workflow.description}</p>
       </div>
       <Section step={1} title="Connect accounts">
-        <ConnectStep workflow={workflow} fakeMode={fakeMode} />
+        <ConnectStep workflow={workflow} />
       </Section>
       <Section step={2} title="Settings">
         <SettingsForm
@@ -56,6 +56,7 @@ function WorkflowView({ workflow, fakeMode }: { workflow: WorkflowDetail; fakeMo
           values={values}
           errors={fieldErrors}
           disabled={busy}
+          slackConnected={workflow.connectors.some((c) => c.id === 'slack' && c.connected)}
           onChange={(key, value) => setValues((v) => ({ ...v, [key]: value }))}
         />
       </Section>

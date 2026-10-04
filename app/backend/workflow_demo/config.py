@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     # Jobs run inside this process, so on startup any unfinished job was lost: fail it.
     recover_jobs_on_startup: bool = True
 
+    # Connections
+    nango_secret_key: SecretStr | None = None
+    nango_host: str = "https://api.nango.dev"
+    # 32 random bytes, base64 (python -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())")
+    data_encryption_key: SecretStr | None = None
+
     # Infrastructure
     database_url: str = "sqlite:///./workflow_demo.db"
     public_base_url: str = "http://localhost:8000"

@@ -22,6 +22,9 @@ export interface ConnectorStatus {
   purpose: string
   help: string | null
   connected: boolean
+  /** What's connected, e.g. a Slack workspace, Google email or "saved · ends with 1234" (never a secret). */
+  label: string | null
+  secret: boolean
   managed_by_platform: boolean
 }
 
@@ -85,6 +88,18 @@ export interface Run {
 export interface Health {
   status: string
   fake_platforms: boolean
+  nango_enabled: boolean
+}
+
+export interface ConnectSession {
+  token: string
+  expires_at: string
+  integration: string
+}
+
+export interface SlackChannel {
+  id: string
+  name: string
 }
 
 export interface AdminOverview {
@@ -145,6 +160,12 @@ export const api = {
   workflows: () => request<WorkflowSummary[]>('GET', '/api/workflows'),
   workflow: (id: string) => request<WorkflowDetail>('GET', `/api/workflows/${id}`),
   fakeConnect: (connector: string) => request<unknown>('POST', `/api/connections/${connector}/fake`),
+  startSession: (connector: string) => request<ConnectSession>('POST', `/api/connections/${connector}/session`),
+  completeSession: (connector: string, connectionId: string) =>
+    request<unknown>('POST', `/api/connections/${connector}/complete`, { connection_id: connectionId }),
+  saveSecret: (connector: string, value: string) =>
+    request<unknown>('PUT', `/api/connections/${connector}/secret`, { value }),
+  slackChannels: () => request<SlackChannel[]>('GET', '/api/slack/channels'),
   disconnect: (connector: string) => request<void>('DELETE', `/api/connections/${connector}`),
   deploy: (id: string, settings: Record<string, unknown>) =>
     request<Deployment>('POST', `/api/deployments/${id}`, { settings }),
