@@ -84,6 +84,7 @@ def _sheet_column(column_id: str) -> dict[str, Any]:
 UPTIME_SITES_TAB = "Sites"
 UPTIME_LOG_TAB = "Log"
 UPTIME_SCHEDULE_MINUTES = 30
+UPTIME_SITE_TIMEOUT_MS = 15_000  # a site that answers slower counts as DOWN
 
 
 def fix_uptime(original: Workflow) -> Workflow:
@@ -109,17 +110,27 @@ def fix_uptime(original: Workflow) -> Workflow:
     _require(loop["type"] == "n8n-nodes-base.splitInBatches", "For Each Site... is not a loop node")
     loop["parameters"]["batchSize"] = 1
 
-    # A blank Status cell (e.g. a newly added site) matched no route at all. Treat anything that
-    # isn't DOWN as UP.
+    # A site that doesn't answer (timeout, DNS failure, refused) made the check throw and failed the
+    # whole run: neverError only covers HTTP error codes. Continue with the failed item (it has no
+    # statusCode) and give up after UPTIME_SITE_TIMEOUT_MS so one dead site doesn't stall the run.
+    check = wj.node(wf, "Perform Site Test")
+    _require(check["type"] == "n8n-nodes-base.httpRequest", "Perform Site Test is not an HTTP node")
+    check["onError"] = "continueRegularOutput"
+    check["parameters"].setdefault("options", {})["timeout"] = UPTIME_SITE_TIMEOUT_MS
+
+    # Reachable means an HTTP status below 400; no status at all (the failed request above) is DOWN.
+    # A blank Status cell (e.g. a newly added site) counts as UP; the original matched no route.
     calc = wj.node(wf, "Calculate Status")
-    for name in ("UP_FROM_UP", "DOWN_FROM_UP"):
-        assignment = _assignment(calc, name)
-        assignment["value"] = _replace_once(
-            assignment["value"],
-            "$json.Status === 'UP'",
-            "$json.Status !== 'DOWN'",
-            f"Calculate Status {name}",
-        )
+    reachable = "($json.statusCode > 0 && $json.statusCode < 400)"
+    for name, condition in (
+        ("UP_FROM_UP", f"{reachable} && $json.Status !== 'DOWN'"),
+        ("DOWN_FROM_DOWN", f"!{reachable} && $json.Status === 'DOWN'"),
+        ("UP_FROM_DOWN", f"{reachable} && $json.Status === 'DOWN'"),
+        ("DOWN_FROM_UP", f"!{reachable} && $json.Status !== 'DOWN'"),
+    ):
+        _set_assignment(calc, name, f"={{{{ {condition} }}}}")
+    # A failed request has no Date header: use the run's own time (same HTTP-date format).
+    _set_assignment(calc, "date", "={{ $json.headers?.date ?? $now.toUTC().toHTTP() }}")
 
     # All sheet nodes use the spreadsheet created for the user at deploy time, addressed by tab name.
     for name, tab in (
