@@ -21,6 +21,28 @@ def assert_no_secrets(data):
         assert not pattern.search(text), pattern.pattern
 
 
+def test_uptime_unreachable_site_counts_as_down(originals):
+    # Tester report: a site that doesn't answer made "Perform Site Test" throw ("The connection timed
+    # out"), so the whole run failed and no DOWN alert was sent.
+    wf = fixes.fix_uptime(originals["uptime-monitor"])
+    check = wj.node(wf, "Perform Site Test")
+    assert check["onError"] == "continueRegularOutput"  # the failed request still reaches Calculate Status
+    assert check["parameters"]["options"]["timeout"] == fixes.UPTIME_SITE_TIMEOUT_MS
+    assert check["parameters"]["options"]["response"]["response"]["neverError"] is True  # 4xx/5xx kept
+    calc = wj.node(wf, "Calculate Status")
+    reachable = "($json.statusCode > 0 && $json.statusCode < 400)"
+    expected = {
+        "UP_FROM_UP": f"={{{{ {reachable} && $json.Status !== 'DOWN' }}}}",
+        "DOWN_FROM_DOWN": f"={{{{ !{reachable} && $json.Status === 'DOWN' }}}}",
+        "UP_FROM_DOWN": f"={{{{ {reachable} && $json.Status === 'DOWN' }}}}",
+        "DOWN_FROM_UP": f"={{{{ !{reachable} && $json.Status !== 'DOWN' }}}}",
+    }
+    for name, value in expected.items():
+        assert fixes._assignment(calc, name)["value"] == value, name
+    # No response, no Date header: fall back to the run's own time.
+    assert fixes._assignment(calc, "date")["value"] == "={{ $json.headers?.date ?? $now.toUTC().toHTTP() }}"
+
+
 def test_uptime_fix(originals):
     wf = fixes.fix_uptime(originals["uptime-monitor"])
     assert wf["name"] == "Uptime monitor (demo)"

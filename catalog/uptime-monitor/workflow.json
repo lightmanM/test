@@ -29,7 +29,7 @@
               "id": "b0cbcff5-bfcf-46a5-a386-65c4dd56c42f",
               "name": "date",
               "type": "string",
-              "value": "={{ $json.headers.date }}"
+              "value": "={{ $json.headers?.date ?? $now.toUTC().toHTTP() }}"
             },
             {
               "id": "8c4155e4-bcc6-41dd-9582-346a57a7b997",
@@ -41,25 +41,25 @@
               "id": "f0320678-d352-486f-a633-9980c4fc73b2",
               "name": "UP_FROM_UP",
               "type": "boolean",
-              "value": "={{ $json.statusCode < 400 && $json.Status !== 'DOWN' }}"
+              "value": "={{ ($json.statusCode > 0 && $json.statusCode < 400) && $json.Status !== 'DOWN' }}"
             },
             {
               "id": "61783eb6-a683-44c9-aa0c-5fc5247da9fa",
               "name": "DOWN_FROM_DOWN",
               "type": "boolean",
-              "value": "={{ $json.statusCode >= 400 && $json.Status === 'DOWN' }}"
+              "value": "={{ !($json.statusCode > 0 && $json.statusCode < 400) && $json.Status === 'DOWN' }}"
             },
             {
               "id": "1052a69e-4456-445d-bdd9-2765b334cf64",
               "name": "UP_FROM_DOWN",
               "type": "boolean",
-              "value": "={{ $json.statusCode < 400 && $json.Status === 'DOWN' }}"
+              "value": "={{ ($json.statusCode > 0 && $json.statusCode < 400) && $json.Status === 'DOWN' }}"
             },
             {
               "id": "9af72278-5b29-406a-b4c5-f47f3d805063",
               "name": "DOWN_FROM_UP",
               "type": "boolean",
-              "value": "={{ $json.statusCode >= 400 && $json.Status !== 'DOWN' }}"
+              "value": "={{ !($json.statusCode > 0 && $json.statusCode < 400) && $json.Status !== 'DOWN' }}"
             }
           ]
         },
@@ -303,7 +303,8 @@
               "fullResponse": true,
               "neverError": true
             }
-          }
+          },
+          "timeout": 15000
         }
       },
       "id": "b37537d1-eedf-446e-a5ed-2ef7388fd7bc",
@@ -313,7 +314,8 @@
         1520,
         544
       ],
-      "typeVersion": 4.2
+      "typeVersion": 4.2,
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
