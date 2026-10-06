@@ -131,8 +131,10 @@ which OAuth app Nango uses, so either path below is a change in Google Cloud and
    - **Slack** — integration ID `slack`; client ID/secret from §1; scopes
      `chat:write,chat:write.public,channels:read`.
    - **Google** — integration ID `google`; client ID/secret from §3; scopes from §3.
-3. **Environment settings** → copy the secret key. The demo calls Google through Nango's proxy, so a
-   scoped API key needs the `environment:proxy` scope (as well as connect sessions and connections).
+3. **Environment settings** → copy the secret key. The default full-access key works. A scoped key
+   needs `environment:connect_sessions:write`, `environment:connections:read_credentials` (Slack's bot
+   token and user ID), `environment:connections:delete`, `environment:integrations:list` (setup
+   check) and `environment:proxy` (every Google call).
 
 Produces: `NANGO_SECRET_KEY` (integration IDs default to `slack` and `google`).
 

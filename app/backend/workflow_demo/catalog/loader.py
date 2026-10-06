@@ -137,10 +137,11 @@ def validate_entry(catalog: Catalog, entry: WorkflowEntry, entry_dir: Path) -> N
                     fail(f"credential slot {slot!r}: the Google relay key is an httpHeaderAuth credential")
                 if not spec.google_apis:
                     fail(f"credential slot {slot!r} uses the Google relay but google_apis is empty")
-        if spec.google_apis and not any(
-            c.source is CredentialSource.GOOGLE_RELAY for c in spec.credentials.values()
-        ):
+        relay_slots = [c for c in spec.credentials.values() if c.source is CredentialSource.GOOGLE_RELAY]
+        if spec.google_apis and not relay_slots:
             fail("google_apis is set but no credential slot uses the Google relay")
+        if len(relay_slots) > 1:
+            fail("only one credential slot can use the Google relay (one key per deployment)")
         leftovers = wj.real_credential_refs(template)
         if leftovers:
             fail(f"template references real credentials: {leftovers}")

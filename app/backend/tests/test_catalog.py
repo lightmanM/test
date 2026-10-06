@@ -81,3 +81,23 @@ def test_platform_section_must_match(catalog_copy):
     edit_yaml(catalog_copy / "slack-meegle-bot" / "catalog.yaml", lambda d: d.pop("modal"))
     with pytest.raises(CatalogError, match="section is missing"):
         load_catalog(catalog_copy)
+
+
+def test_google_relay_slots_are_checked(catalog_copy):
+    medium = catalog_copy / "medium-digest" / "catalog.yaml"
+
+    def second_relay_slot(d):  # one key per deployment: a second slot would invalidate the first
+        d["n8n"]["credentials"]["reader"] = {
+            "type": "httpHeaderAuth",
+            "source": "google_relay",
+            "ref": "google",
+        }
+
+    edit_yaml(medium, second_relay_slot)
+    with pytest.raises(CatalogError, match="only one credential slot"):
+        load_catalog(catalog_copy)
+
+    shutil.copy(paths.CATALOG_DIR / "medium-digest" / "catalog.yaml", medium)
+    edit_yaml(medium, lambda d: d["n8n"].pop("google_apis"))
+    with pytest.raises(CatalogError, match="google_apis is empty"):
+        load_catalog(catalog_copy)

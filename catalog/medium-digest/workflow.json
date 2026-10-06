@@ -437,7 +437,6 @@
         1280,
         -100
       ],
-      "onError": "continueRegularOutput",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "parameters": {
@@ -454,7 +453,14 @@
             }
           ]
         },
-        "options": {}
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 1000
+            }
+          }
+        }
       },
       "credentials": {
         "httpHeaderAuth": {

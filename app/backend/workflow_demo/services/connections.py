@@ -167,7 +167,7 @@ def describe(svc: AppServices, connector_id: str, conn: NangoConnection) -> dict
             "bot_user_id": raw.get("bot_user_id"),
         }
     if connector_id == "google":
-        # Through Nango's proxy: Google tokens are never read out of Nango.
+        # Through Nango's proxy: the demo never uses (or stores) a Google token.
         email = google.user_email(GoogleApi(_nango(svc), conn.connection_id, conn.provider_config_key))
         return {"label": email or "Google account", "email": email}
     return {"label": conn.provider or connector_id}

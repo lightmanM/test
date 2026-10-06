@@ -15,22 +15,22 @@ router = APIRouter(prefix=RELAY_PATH, tags=["google relay"], include_in_schema=F
 
 @router.api_route("/{path:path}", methods=["GET", "POST", "PUT"])
 async def relay(path: str, request: Request, svc: Services) -> Response:
-    length = request.headers.get("content-length") or "0"
-    if not length.isdigit() or int(length) > google_relay.MAX_BODY:
-        return _error(413, "Request body too large")
-    body = await request.body()
+    # Bounded however the body is sent (a chunked body has no Content-Length).
+    body = b""
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > google_relay.MAX_BODY:
+            return _error(413, "Request body too large")
 
     def forward() -> google_relay.RelayResponse:
-        with svc.db.session() as db:
-            return google_relay.relay(
-                svc,
-                db,
-                authorization=request.headers.get("authorization"),
-                method=request.method,
-                path=path,
-                query=list(request.query_params.multi_items()),
-                body=body,
-            )
+        return google_relay.relay(
+            svc,
+            authorization=request.headers.get("authorization"),
+            method=request.method,
+            path=path,
+            query=list(request.query_params.multi_items()),
+            body=body,
+        )
 
     try:
         result = await run_in_threadpool(forward)

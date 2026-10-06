@@ -31,6 +31,7 @@ def real(make_settings):
         data_encryption_key=KEY,
         n8n_base_url=N8N,
         n8n_api_key="n8n-key",
+        relay_base_url="http://demo.internal:8000",
     )
     svc = build_services(settings, runner_factory=InlineJobRunner)
     svc.db.create_all()

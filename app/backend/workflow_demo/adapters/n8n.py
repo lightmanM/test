@@ -68,7 +68,9 @@ SHARED_VALUES: dict[str, OwnerItem] = {
     "reader_url": OwnerItem(("reader_base_url",), lambda s: f"{s.reader_base_url.rstrip('/')}/extract"),
     "llm_endpoint": OwnerItem((), lambda s: f"{s.openai_base_url.rstrip('/')}/chat/completions"),
     # Base of the Google relay ({google_api}/sheets/v4/..., {google_api}/gmail/v1/...).
-    "google_api": OwnerItem((), lambda s: f"{s.relay_url}{relay_keys.RELAY_PATH}"),
+    "google_api": OwnerItem(
+        ("relay_base_url",), lambda s: f"{s.relay_base_url.rstrip('/')}{relay_keys.RELAY_PATH}"
+    ),
 }
 SHARED_CREDENTIALS: dict[str, OwnerItem] = {
     "openai": OwnerItem(
@@ -212,7 +214,8 @@ class N8nAdapter:
             relay: dict[str, str] = {}
             for slot_name, slot in spec.credentials.items():
                 if slot.source is CredentialSource.GOOGLE_RELAY:
-                    secrets.google_api(slot.ref)  # the user's Google connection must be a real one
+                    if not sheet:  # making the spreadsheet already proved the connection works
+                        google.check_connection(secrets.google_api(slot.ref))
                     key, relay[relay_keys.KEY_REF] = relay_keys.new_key(ctx.deployment_id)
                     data = {"name": "Authorization", "value": f"Bearer {key}"}
                 else:

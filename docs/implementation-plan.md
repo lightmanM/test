@@ -27,7 +27,7 @@ owner's single account on each platform.
 | R12 | **Workflow fixes** applied: Make reacts only to merged PRs · Uptime status-update fixed and unconnected Gmail step removed · Meegle digest posts to Slack only when a webhook is set. |
 | R13 | **Freedium is kept** for Medium article fetching (owner's decision). |
 | R14 | **Google OAuth app is External, kept in "Testing"**: only the Google accounts on its test-user list (≤100, added one by one) can connect; sign-ins end after 7 days and the demo asks to reconnect. (Was "Internal"; the testers span two Workspace domains.) Opening to external users means publishing a verified app (or Nango's developer app) — no workflow change, see R15. |
-| R15 | **Google only through Nango's proxy**: neither the demo nor n8n ever holds a Google token or OAuth client. n8n workflows call the demo's **Google relay** with a per-deployment key; the relay allows only that workflow's calls (Sheets cells of the deployment's own spreadsheet, or Gmail search/read) and forwards them to Nango's proxy as the tester's connection. |
+| R15 | **Google only through Nango's proxy**: no Google token or OAuth client is stored by the demo or given to n8n (Nango's connection read may include the token; the demo ignores it). n8n workflows call the demo's **Google relay** with a per-deployment key; the relay allows only that workflow's calls (Sheets cells of the deployment's own spreadsheet, or Gmail search/read) and forwards them to Nango's proxy as the tester's connection. |
 
 ---
 
@@ -191,7 +191,7 @@ All adapters implement: `check_available()`, `deploy(ctx)`, `undeploy(ctx)`, `ru
 
 **Nango**: connect sessions; verify connection tags; fetch fresh credentials for Slack (`GET /connections/{id}?provider_config_key=…`, never the refresh token); Slack raw response for `authed_user.id`; **proxy** for every Google call (`/proxy/<path>` with `Connection-Id`, `Provider-Config-Key`, `Base-Url-Override` naming the Google host). Integrations: `slack` (scopes `chat:write chat:write.public channels:read`), `google` (scopes Sheets, Drive file, Gmail read-only, email).
 
-**Google relay** (`/api/google-relay/…`, `services/google_relay.py`): `Authorization: Bearer <deployment id>.<random>` (an n8n Header Auth credential per deployment; only its SHA-256 is stored) → the deployment must be active and unexpired → the call must be on the workflow's `google_apis` allowlist (`sheets`: GET/PUT `…/values/<A1 range>` and POST `…:append` on the deployment's spreadsheet; `gmail_read`: list and get `users/me/messages`), with only known query parameters → forwarded to Nango's proxy as the tester's current Google connection. Google's answer is passed back; a refused Nango refresh becomes 409 "reconnect". n8n on the same server uses the internal address (`RELAY_BASE_URL`); Caddy doesn't offer the relay publicly.
+**Google relay** (`/api/google-relay/…`, `services/google_relay.py`): `Authorization: Bearer <deployment id>.<random>` (an n8n Header Auth credential per deployment; only its SHA-256 is stored) → the deployment must be active and unexpired → the call must be on the workflow's `google_apis` allowlist (`sheets`: GET/PUT `…/values/<A1 range>` and POST `…:append` on the deployment's spreadsheet; `gmail_read`: list and get `users/me/messages`), with only known query parameters → forwarded to Nango's proxy as the tester's current Google connection. Google's answer is passed back; a refused Nango refresh becomes 409 "reconnect". n8n on the same server uses the internal address (`RELAY_BASE_URL`, required; without it the two workflows show "not set up"); Caddy doesn't offer the relay publicly. n8n reads Gmail messages 5 at a time, a second apart.
 
 **n8n** (`X-N8N-API-KEY`):
 - `GET /credentials/schema/{type}` at startup to validate payloads; `POST /credentials`; `DELETE /credentials/{id}`.
@@ -207,7 +207,7 @@ All adapters implement: `check_available()`, `deploy(ctx)`, `undeploy(ctx)`, `ru
 
 ## 9. Security
 
-- Slack/Google tokens live in Nango; the demo stores only connection IDs. Google tokens never leave Nango (R15): the demo and n8n reach Google through its proxy.
+- Slack/Google tokens live in Nango; the demo stores only connection IDs. Google tokens are never used, stored or passed on (R15): the demo and n8n reach Google through Nango's proxy.
 - Manual secrets (Meegle) encrypted with AES-GCM (`DATA_ENCRYPTION_KEY`), decrypted only inside deploy jobs, never logged or sent to the browser.
 - Platform secrets in a Modal secret; nothing secret in git (`.env.example` only).
 - Secrets go into platform **credentials**, never into node parameters, so they don't appear in exported workflows or execution data.

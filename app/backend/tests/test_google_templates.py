@@ -165,6 +165,11 @@ def test_medium_searches_gmail_in_the_7_day_window(n8n_js, medium):
     method, path, query, _ = http_call(n8n_js, medium, "Read Gmail message", ids[:1], medium_nodes())
     _, groups = relay_accepts(method, path, query)
     assert (method, groups, query) == ("GET", {"message": "m1"}, [("format", "full")])
+    read = wj.node(medium, "Read Gmail message")
+    # A failed read fails the run instead of quietly becoming an empty report...
+    assert "onError" not in read and "continueOnFail" not in read
+    # ...and the reads go 5 at a time, a second apart (not all 20 at once).
+    assert read["parameters"]["options"]["batching"] == {"batch": {"batchSize": 5, "batchInterval": 1000}}
 
 
 def test_medium_messages_feed_the_teams_link_extraction(n8n_js, medium):
@@ -173,7 +178,7 @@ def test_medium_messages_feed_the_teams_link_extraction(n8n_js, medium):
     )
     shaped = n8n_js(
         wj.node(medium, "Find Medium Daily Digest emails")["parameters"]["jsCode"],
-        [item(**gmail_message("m1", html)), item(error={"message": "404"})],  # a deleted message is skipped
+        [item(**gmail_message("m1", html)), item(resultSizeEstimate=1)],  # only messages count
     )
     assert len(shaped) == 1
     email = shaped[0]["json"]

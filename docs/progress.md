@@ -24,7 +24,7 @@ Living document. Update at the end of every work session and every PR.
 | P5 Make Bridge | [#7](https://github.com/lightmanM/test/pull/7) | merged | Bridge adapter, popup + callback, unavailable state |
 | P6 Lifecycle & admin | [#8](https://github.com/lightmanM/test/pull/8) | merged | 24 h sweeper, redeploy/delete, admin page, setup check, E2E |
 | P7 Go live | [#9](https://github.com/lightmanM/test/pull/9) | packaging merged; live part waits on owner | Modal + Neon deploy, owner credentials, live checklist |
-| Google through Nango | (this PR) | in review | Google calls via Nango's proxy; n8n's via the demo's Google relay |
+| Google through Nango | [#15](https://github.com/lightmanM/test/pull/15) | in review | Google calls via Nango's proxy; n8n's via the demo's Google relay |
 
 ## Phase checklists
 
@@ -209,10 +209,16 @@ for the Medium digest), and passes on only known query parameters, then forwards
 uptime monitor's three Sheets nodes and the Medium digest's Gmail node become HTTP Request nodes + small Code
 nodes producing the same items as before (`catalog/fixes.py`); tests run that JavaScript and the HTTP nodes'
 expressions in Node (`tests/test_google_templates.py`, `n8n_js` fixture) and check the relay accepts the calls.
-`GOOGLE_CLIENT_ID/SECRET` and the refresh-token path are gone; `RELAY_BASE_URL` (default `PUBLIC_BASE_URL`;
-`http://demo:8000` on the server, and Caddy doesn't offer the relay publicly). Setup check: "Google relay"
-(the demo answers at that address) replaces "Google OAuth client". Failed runs show the API's explanation
-(n8n's error `description`). 187 backend tests.
+`GOOGLE_CLIENT_ID/SECRET` and the refresh-token path are gone; `RELAY_BASE_URL` is required (`http://demo:8000` on
+the server, where Caddy doesn't offer the relay publicly; without it both workflows show "not set up"). Setup check:
+"Google relay" (the relay itself answers at that address) replaces "Google OAuth client". Failed runs show the API's
+explanation (n8n's error `description`).
+Review fixes (independent review, 7 minor): the relay closes its DB session before the Nango call (n8n sends bursts);
+Gmail reads go 5 at a time, a second apart, and a failed read fails the run (no silent empty report); deploys check
+the Google connection still works (Medium makes no other Google call at deploy); `RELAY_BASE_URL` no longer falls
+back to the public address (blocked there); request bodies are capped while streamed (chunked too); the catalog allows
+one relay slot per workflow; docs say "never used, stored or passed on" and list the Nango key scopes. 190 backend
+tests.
 - [x] Nango proxy client; backend Google calls through it; no refresh token requested anywhere
 - [x] Google relay (key, live deployment, per-workflow allowlist, own spreadsheet only) + tests
 - [x] Uptime + Medium templates via the relay; JS/expression tests; catalog regenerated
@@ -240,7 +246,7 @@ expressions in Node (`tests/test_google_templates.py`, `n8n_js` fixture) and che
 | 2026-10-04 | Leaked Meegle token removed from git history (2 commits rewritten; `main` now at e7c40dc). Owner to revoke the token in Meegle. |
 
 ## Session log
-- 2026-10-06: Google through Nango: Nango proxy client, backend Google calls through it, the Google relay for n8n, uptime + Medium templates rewritten onto it (JS run in tests), settings/setup check/docs updated; 187 backend tests.
+- 2026-10-06: Google through Nango: Nango proxy client, backend Google calls through it, the Google relay for n8n, uptime + Medium templates rewritten onto it (JS run in tests), settings/setup check/docs updated; PR #15 reviewed (7 minor findings fixed); 190 backend tests.
 - 2026-10-04: Tester bug (uptime): a site that doesn't answer (e.g. a timeout) made "Perform Site Test" throw, failing the run with no alert (also in the team's template). The check now continues on error with a 15 s timeout, no response counts as DOWN, and the log date falls back to the run time. Verified live; 170 backend tests.
 - 2026-10-04: Tester bug (uptime): changing "Websites to monitor" and redeploying kept the old sites — the redeploy reused the spreadsheet and ignored the list. Now the list is written into the Sites tab when it changed since it was last written (`sites_written` ref; older deployments rewrite once); unchanged lists keep edits made in the sheet. Verified live; 169 backend tests.
 - 2026-10-04: P7 live on AWS: provisioned the server, deployed the stack, set up Google/Slack/Nango/OpenAI, live-tested uptime, Medium and Meegle digest; fixed n8n delete (unpublish + retry) and the Medium empty-inbox path (165 backend tests).

@@ -118,7 +118,6 @@ def relay_slot(entry: WorkflowEntry) -> tuple[str, str] | None:
 
 def relay(
     svc: AppServices,
-    db: Session,
     *,
     authorization: str | None,
     method: str,
@@ -126,15 +125,18 @@ def relay(
     query: list[tuple[str, str]],
     body: bytes,
 ) -> RelayResponse:
-    dep = _authenticate(db, authorization)
-    entry = _workflow(svc, dep)
-    route, match = _match(method, path)
-    if route.access not in entry.n8n.google_apis:
-        raise RelayError(403, f"{entry.name} isn't allowed to make this Google call")
-    groups = match.groupdict()
-    if "sheet" in groups and groups["sheet"] != (dep.platform_refs or {}).get("spreadsheet_id"):
-        raise RelayError(403, "Only the spreadsheet created for this deployment can be used")
-    api = _google_api(svc, dep, entry)
+    # Every check reads the database; the session (and its pooled connection) is closed before the
+    # Nango call, which can take seconds and comes in bursts (one call per Gmail message).
+    with svc.db.session() as db:
+        dep = _authenticate(db, authorization)
+        entry = _workflow(svc, dep)
+        route, match = _match(method, path)
+        if route.access not in entry.n8n.google_apis:
+            raise RelayError(403, f"{entry.name} isn't allowed to make this Google call")
+        groups = match.groupdict()
+        if "sheet" in groups and groups["sheet"] != (dep.platform_refs or {}).get("spreadsheet_id"):
+            raise RelayError(403, "Only the spreadsheet created for this deployment can be used")
+        api = _google_api(svc, dep, entry)
     params = [(k, v) for k, v in query if k in route.params]
     payload: Any = None
     if method in ("POST", "PUT"):

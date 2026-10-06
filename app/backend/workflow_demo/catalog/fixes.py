@@ -385,6 +385,8 @@ MEDIUM_READER_TIMEOUT_MS = 45_000
 MEDIUM_READER_NODE_TIMEOUT_MS = 60_000
 MEDIUM_LLM_TIMEOUT_MS = 60_000
 MEDIUM_MAX_MESSAGES = 20  # newest matching emails read per run (the 5 articles come from these)
+# Messages are read 5 at a time, a second apart: n8n would otherwise start all 20 reads at once.
+MEDIUM_READ_BATCH = {"batch": {"batchSize": 5, "batchInterval": 1000}}
 MEDIUM_GMAIL_NODE = "Find Medium Daily Digest emails"
 _MEDIUM_CONFIG = "$('Workflow configuration').first().json"
 _MEDIUM_WINDOW = "$('Build rolling 7-day window').first().json"
@@ -532,11 +534,11 @@ def _medium_gmail_through_relay(wf: Workflow, config: wj.Node) -> None:
         {
             "name": "Read Gmail message",
             "position": [x + 600, y - 100],
-            # A message deleted since the search is skipped (it has no payload).
-            "onError": "continueRegularOutput",
+            # A failed read fails the run (as the Gmail node did) rather than giving an empty report.
             **_relay_call("GET", f"{messages_url}/{{{{ $json.id }}}}", query={"format": "full"}),
         },
     ]
+    added[-1]["parameters"]["options"] = {"batching": MEDIUM_READ_BATCH}
     for n in added:
         wj.add_node(wf, {"id": wj.new_node_id(wf["name"], n["name"]), **n})
     # The search result (no messages) also goes straight on, so an empty inbox still reaches

@@ -118,6 +118,16 @@ def test_setup_check_reports_a_relay_url_that_isnt_the_demo(live_admin):
     assert "RELAY_BASE_URL" in checks["Google relay"]["detail"]
 
 
+@respx.mock
+def test_setup_check_without_relay_base_url(live_admin):
+    live_admin.app.state.services.settings.relay_base_url = None
+    respx.route().mock(return_value=httpx.Response(200, json={"data": []}))
+    checks = {c["name"]: c for c in live_admin.get("/api/admin/setup").json()["checks"]}
+    assert (
+        checks["Google relay"]["state"] == "missing" and "RELAY_BASE_URL" in checks["Google relay"]["detail"]
+    )
+
+
 def test_setup_check_reaches_the_real_relay(client, make_settings):
     # The probe's expectation matches what the relay really answers without a key.
     resp = client.get("/api/google-relay/check")

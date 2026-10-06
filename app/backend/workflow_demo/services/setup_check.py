@@ -100,11 +100,12 @@ def run_checks(svc: AppServices) -> dict[str, Any]:
             return f"API key accepted by {s.n8n_base_url}"
 
         checks.append(_probe("n8n", n8n))
+        relay_url = (s.relay_base_url or "").rstrip("/")
 
         def relay() -> str:
             # n8n calls Google at this address (Nango's proxy behind it). Without a key the relay
             # answers 401 with its own error; anything else means the address is wrong or blocked.
-            url = f"{s.relay_url}{RELAY_PATH}/check"
+            url = f"{relay_url}{RELAY_PATH}/check"
             resp = svc.http.get(url, timeout=TIMEOUT)
             try:
                 message = resp.json()["error"]["message"]
@@ -114,9 +115,13 @@ def run_checks(svc: AppServices) -> dict[str, Any]:
                 raise RuntimeError(
                     f"HTTP {resp.status_code} from {url}: not the demo's Google relay (RELAY_BASE_URL)"
                 )
-            return f"n8n calls Google through {s.relay_url}{RELAY_PATH} and Nango's proxy"
+            return f"n8n calls Google through {relay_url}{RELAY_PATH} and Nango's proxy"
 
-        checks.append(_probe("Google relay", relay))
+        checks.append(
+            _probe("Google relay", relay)
+            if relay_url
+            else Check("Google relay", "missing", "RELAY_BASE_URL not set (uptime monitor, Medium digest)")
+        )
     else:
         checks.append(Check("n8n", "missing", "N8N_BASE_URL / N8N_API_KEY not set"))
     if s.openai_api_key:

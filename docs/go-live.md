@@ -41,7 +41,8 @@ needed; Caddy gets their certificates.
   `DATABASE_URL` with `DEMO_DB_PASSWORD`, passcodes, the generated secrets and the account values
   from step 1. `READER_API_TOKEN` must equal the one in `deploy/aws/.env` (deploy.sh checks).
   Keep `RELAY_BASE_URL=http://demo:8000`: n8n calls Google through the demo's relay at that internal
-  address (Caddy doesn't offer the relay publicly).
+  address (Caddy doesn't offer the relay publicly). Without it the uptime monitor and Medium digest
+  show "Not set up".
 - `deploy/aws/bot.env` from `deploy/aws/bot.env.example` (or the team's
   `demo-project/slark-meegle-bot/.env`) plus the same `BOT_API_TOKEN` as `deploy/production.env`.
 

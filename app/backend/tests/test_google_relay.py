@@ -250,6 +250,24 @@ def test_request_bodies_are_checked(relay):
     assert resp.status_code == 400
     resp = client.put(f"{VALUES}/Sites!B4", content=b"[" + b"1," * 40_000 + b"1]", headers=headers)
     assert resp.status_code == 413
+    # A chunked body (no Content-Length) is capped too, before the key is even checked.
+    chunks = iter([b"[" + b"1," * 20_000] * 4 + [b"1]"])
+    resp = client.put(f"{VALUES}/Sites!B4", content=chunks, headers={"Authorization": "Bearer x"})
+    assert resp.status_code == 413
+
+
+@respx.mock
+def test_the_database_connection_is_free_during_the_nango_call(relay):
+    svc, client, keys = relay
+    seen = []
+
+    def answer(request):
+        seen.append(svc.db.engine.pool.checkedout())
+        return httpx.Response(200, json={"values": []})
+
+    respx.get(url__startswith=f"{PROXY}/v4/").mock(side_effect=answer)
+    assert client.get(f"{VALUES}/Sites!A2:B", headers=auth(keys["uptime-monitor"])).status_code == 200
+    assert seen == [0]
 
 
 @respx.mock

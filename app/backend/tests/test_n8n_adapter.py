@@ -155,9 +155,17 @@ def test_deploy_uptime(adapter):
     }
 
 
+def mock_google_check(status=200, json=None):
+    """The deploy-time check that Nango can still use the Google connection."""
+    return respx.get(f"{PROXY}/oauth2/v3/userinfo").mock(
+        return_value=httpx.Response(status, json=json or {"email": "alice@acme.dev"})
+    )
+
+
 @respx.mock
 def test_meegle_and_medium_credentials(adapter):
     bodies = mock_credentials()
+    google_check = mock_google_check()
     respx.post(f"{API}/workflows").mock(return_value=httpx.Response(200, json={"id": "wf-2"}))
     respx.post(f"{API}/workflows/wf-2/publish").mock(return_value=httpx.Response(200, json={}))
 
@@ -177,6 +185,7 @@ def test_meegle_and_medium_credentials(adapter):
     assert by_type["openAiApi"] == {"apiKey": "sk-owner", "url": "https://api.openai.com/v1"}
     relay = next(b for b in bodies if b["name"].endswith("· google"))
     assert relay["type"] == "httpHeaderAuth" and relay["data"]["value"].startswith("Bearer 7.")
+    assert google_check.call_count == 1  # Medium makes no other Google call at deploy
     reader = next(b for b in bodies if b["name"].endswith("· reader"))
     assert reader["data"] == {"name": "Authorization", "value": "Bearer reader-token"}
 
@@ -184,6 +193,7 @@ def test_meegle_and_medium_credentials(adapter):
 @respx.mock
 def test_medium_values_point_at_shared_services(adapter):
     mock_credentials()
+    mock_google_check()
     created = respx.post(f"{API}/workflows").mock(return_value=httpx.Response(200, json={"id": "wf-3"}))
     respx.post(f"{API}/workflows/wf-3/publish").mock(return_value=httpx.Response(200, json={}))
     adapter.deploy(context("medium-digest", {"slack_channel": "C0123ABCD", "llm_model": "gpt-4o"}))
@@ -335,11 +345,15 @@ def test_connection_problem_stops_before_n8n(adapter):
     credential_calls = respx.post(f"{API}/credentials")
     with pytest.raises(AdapterError, match="Connect Google"):
         adapter.deploy(context("uptime-monitor", UPTIME_SETTINGS, creds=NoGoogle()))
-    # The Medium digest makes no Google call at deploy, but still needs a real Google connection.
+    # The Medium digest needs a real Google connection too...
+    medium = {"slack_channel": "C0123ABCD", "llm_model": "gpt-4o"}
     with pytest.raises(AdapterError, match="Connect Google"):
-        adapter.deploy(
-            context("medium-digest", {"slack_channel": "C0123ABCD", "llm_model": "gpt-4o"}, creds=NoGoogle())
-        )
+        adapter.deploy(context("medium-digest", medium, creds=NoGoogle()))
+    # ...that Nango can still use (Google ends "Testing" sign-ins after 7 days).
+    refused = {"error": {"code": "server_error", "message": "Failed to get connection credentials: 'x'"}}
+    mock_google_check(400, refused)
+    with pytest.raises(AdapterError, match="Your Google connection has expired"):
+        adapter.deploy(context("medium-digest", medium))
     assert not credential_calls.called
 
 
@@ -348,9 +362,11 @@ def test_availability_lists_missing_configuration(make_settings):
     http = httpx.Client()
     adapter = N8nAdapter(settings, N8nClient(N8N, "k", http), http)
     assert adapter.check_available(CATALOG.workflow("meegle-daily-digest")).available
-    assert adapter.check_available(CATALOG.workflow("uptime-monitor")).available  # no Google client needed
+    uptime = adapter.check_available(CATALOG.workflow("uptime-monitor"))  # no Google client needed...
+    assert not uptime.available and uptime.reason.endswith("(missing RELAY_BASE_URL)")  # ...only the relay
     medium = adapter.check_available(CATALOG.workflow("medium-digest"))
     assert "OPENAI_API_KEY" in medium.reason and "READER_BASE_URL" in medium.reason
+    assert "RELAY_BASE_URL" in medium.reason
     with pytest.raises(AdapterError, match="Not set up"):
         adapter.deploy(context("medium-digest", {"slack_channel": "C0123ABCD"}))
 

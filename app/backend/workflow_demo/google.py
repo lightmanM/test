@@ -178,6 +178,11 @@ def delete_file(api: GoogleApi, file_id: str) -> None:
         api.call("DELETE", f"drive/v3/files/{quote(file_id, safe='')}", base_url=GOOGLEAPIS)
 
 
+def check_connection(api: GoogleApi) -> None:
+    """Raise ``GoogleConnectionExpired`` if Nango can no longer use the connection (one cheap call)."""
+    api.call("GET", "oauth2/v3/userinfo", base_url=GOOGLEAPIS)
+
+
 def user_email(api: GoogleApi) -> str | None:
     """The account's email address (OpenID userinfo), shown next to the connection."""
     try:
