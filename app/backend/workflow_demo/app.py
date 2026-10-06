@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from workflow_demo import paths
 from workflow_demo.adapters.registry import AdapterRegistry, fake_registry, real_registry
-from workflow_demo.api import admin, auth, bot, connections, deployments, user_steps, workflows
+from workflow_demo.api import admin, auth, bot, connections, deployments, google_relay, user_steps, workflows
 from workflow_demo.catalog.loader import load_catalog
 from workflow_demo.config import Settings, get_settings
 from workflow_demo.crypto import SecretBox
@@ -78,7 +78,7 @@ def create_app(settings: Settings | None = None, services: AppServices | None = 
         title="Workflow Deploy Demo", docs_url="/api/docs", openapi_url="/api/openapi.json", lifespan=lifespan
     )
     app.state.services = svc
-    for module in (auth, workflows, connections, deployments, admin, user_steps, bot):
+    for module in (auth, workflows, connections, deployments, admin, user_steps, bot, google_relay):
         app.include_router(module.router)
 
     @app.get("/api/health")

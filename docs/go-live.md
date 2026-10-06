@@ -12,8 +12,9 @@ this repo is public, so the address isn't written here).
 
 - [ ] AWS: CLI profile `pond-new` with EC2 rights in us-west-2 — setup guide §7.
 - [ ] Slack: the **Connect** app and the **bot** app (Socket Mode) — §1–2.
-- [ ] Google Cloud **External** OAuth client in **Testing**, with every tester as a test user — §3.
-- [ ] Nango: `slack` and `google` integrations with those clients; secret key — §4.
+- [ ] Google Cloud **External** OAuth client in **Testing**, with every tester as a test user — §3
+      (only Nango gets it: every Google call goes through Nango's proxy).
+- [ ] Nango: `slack` and `google` integrations with those clients; secret key (with proxy access) — §4.
 - [ ] Make: Bridge enabled; template from `catalog/github-merge-slack/make-setup.md`; Bridge key ID +
       secret; template ID — §6.
 - [ ] OpenAI-compatible key; Meegle plugin credentials for the shared bot — §9.
@@ -39,6 +40,9 @@ needed; Caddy gets their certificates.
 - `deploy/production.env` from `deploy/production.env.example`: `PUBLIC_BASE_URL=https://<DEMO_HOST>`,
   `DATABASE_URL` with `DEMO_DB_PASSWORD`, passcodes, the generated secrets and the account values
   from step 1. `READER_API_TOKEN` must equal the one in `deploy/aws/.env` (deploy.sh checks).
+  Keep `RELAY_BASE_URL=http://demo:8000`: n8n calls Google through the demo's relay at that internal
+  address (Caddy doesn't offer the relay publicly). Without it the uptime monitor and Medium digest
+  show "Not set up".
 - `deploy/aws/bot.env` from `deploy/aws/bot.env.example` (or the team's
   `demo-project/slark-meegle-bot/.env`) plus the same `BOT_API_TOKEN` as `deploy/production.env`.
 
@@ -71,7 +75,8 @@ The demo applies its database migrations on start. The n8n owner login is saved 
 
 ## 5. Setup check
 
-Admin page (`/admin`) → **Run setup check**: every line ✓ and every workflow available.
+Admin page (`/admin`) → **Run setup check**: every line ✓ and every workflow available
+("Google relay" ✓ means the demo answers at `RELAY_BASE_URL`).
 
 ## 6. Live checklist (one test user, then a second one)
 
@@ -83,6 +88,8 @@ Admin page (`/admin`) → **Run setup check**: every line ✓ and every workflow
       Run now → diff in Slack, run listed. Check the run's details look right (log field names are inferred).
 - [ ] **Slack bot**: Activate for me; `@bot Fix login page error @you` → card + thread reply; card listed.
 - [ ] Redeploy and delete one of each; n8n and Make keep nothing behind (Run sweeper now removes nothing).
+- [ ] n8n holds no Google token: its Credentials page lists each Google slot (`demo · <user> · <workflow> ·
+      google`) as Header Auth (the relay key), and Nango's Logs show the Sheets/Gmail calls.
 - [ ] Two users deploy the same workflow independently.
 - [ ] Expiry: set `DEPLOYMENT_TTL_HOURS=0.05` in `deploy/production.env` and run `deploy/aws/deploy.sh`;
       deploy a workflow, wait 3 minutes, then admin page → **Run sweeper now** (it also runs every
@@ -112,6 +119,10 @@ docker compose exec -T postgres pg_dumpall -U postgres > backup.sql   # database
   without them saved Meegle tokens and n8n credentials are unreadable. Never run `docker compose down -v`
   (it deletes the database volumes).
 - **Upgrade n8n**: `N8N_VERSION` in `deploy/aws/.env` (the runner follows), then deploy.
+- **Google through Nango (from 2026-10-06)**: on a server set up before then, add
+  `RELAY_BASE_URL=http://demo:8000` to `deploy/production.env` (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`
+  are no longer used and can go), run `deploy/aws/deploy.sh`, then the setup check. Uptime and Medium
+  deployments made before keep their old n8n Google credential until they're redeployed or expire.
 - **n8n editor**: `https://<N8N_HOST>`, owner login in `deploy/aws/n8n-owner.env`. Reachable only from the IP
   that last ran `deploy.sh` (everyone else gets 403); after your IP changes, run `deploy.sh` again.
 - **Certificates**: sslip.io names share Let's Encrypt's per-domain limits; if a fresh server can't get

@@ -51,9 +51,9 @@ class Settings(BaseSettings):
     # n8n (uptime monitor, Meegle digest, Medium digest)
     n8n_base_url: str | None = None  # e.g. https://acme.app.n8n.cloud
     n8n_api_key: SecretStr | None = None
-    # The Internal Google OAuth client configured in Nango; n8n needs it to refresh Google tokens.
-    google_client_id: str | None = None
-    google_client_secret: SecretStr | None = None
+    # The demo's address as n8n reaches it, for the Google relay (n8n calls Google through the demo
+    # and Nango): http://demo:8000 on the AWS server, where Caddy doesn't offer the relay publicly.
+    relay_base_url: str | None = None
     # Owner-provided keys, given to each Medium digest deployment as its own n8n credentials.
     openai_api_key: SecretStr | None = None
     openai_base_url: str = "https://api.openai.com/v1"

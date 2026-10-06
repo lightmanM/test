@@ -66,16 +66,43 @@ def _renumber_node_ids(wf: Workflow) -> None:
         n["id"] = wj.new_node_id(wf["name"], n["name"])
 
 
-def _sheet_column(column_id: str) -> dict[str, Any]:
+def _replace_node(wf: Workflow, name: str, new: wj.Node) -> wj.Node:
+    """Swap a node for a different one under the same name, so its connections and the
+    expressions that refer to it keep working."""
+    old = wj.node(wf, name)
+    node_id = old.get("id") or wj.new_node_id(wf["name"], name)
+    old.clear()
+    old.update({"id": node_id, "name": name, **new})
+    return old
+
+
+def _relay_call(
+    method: str, url: str, *, query: dict[str, str] | None = None, body: str | None = None
+) -> wj.Node:
+    """An HTTP Request node calling the demo's Google relay (Google through Nango's proxy) with the
+    deployment's relay key (``google`` slot, an httpHeaderAuth credential)."""
+    parameters: dict[str, Any] = {
+        "method": method,
+        "url": url,
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+    }
+    if query:
+        parameters["sendQuery"] = True
+        parameters["queryParameters"] = {"parameters": [{"name": k, "value": v} for k, v in query.items()]}
+    if body is not None:
+        parameters |= {"sendBody": True, "specifyBody": "json", "jsonBody": body}
+    parameters["options"] = {}
+    n: wj.Node = {"type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "parameters": parameters}
+    wj.set_credential_slot(n, "httpHeaderAuth", "google")
+    return n
+
+
+def _code(js: str) -> wj.Node:
     return {
-        "id": column_id,
-        "displayName": column_id,
-        "required": False,
-        "defaultMatch": False,
-        "display": True,
-        "type": "string",
-        "canBeUsedToMatch": True,
-        "removed": False,
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "parameters": {"mode": "runOnceForAllItems", "jsCode": js},
     }
 
 
@@ -85,6 +112,24 @@ UPTIME_SITES_TAB = "Sites"
 UPTIME_LOG_TAB = "Log"
 UPTIME_SCHEDULE_MINUTES = 30
 UPTIME_SITE_TIMEOUT_MS = 15_000  # a site that answers slower counts as DOWN
+UPTIME_CONFIG_NODE = "Spreadsheet"
+_UPTIME_CONFIG = f"$('{UPTIME_CONFIG_NODE}').first().json"
+UPTIME_SHEET_URL = (
+    f"{{{{ {_UPTIME_CONFIG}.googleApi }}}}/sheets/v4/spreadsheets/{{{{ {_UPTIME_CONFIG}.spreadsheetId }}}}"
+)
+UPTIME_LOG_COLUMNS = ("date", "Property", "UP_FROM_UP", "DOWN_FROM_DOWN", "UP_FROM_DOWN", "DOWN_FROM_UP")
+UPTIME_SITES_JS = """\
+// One item per site in the Sites tab (row 2 onwards), like the Google Sheets node made.
+const rows = $input.first().json.values || [];
+return rows
+  .map((row, index) => ({
+    Property: String(row[0] ?? '').trim(),
+    Status: String(row[1] ?? '').trim(),
+    row_number: index + 2,
+  }))
+  .filter((site) => site.Property)
+  .map((site) => ({ json: site }));
+"""
 
 
 def fix_uptime(original: Workflow) -> Workflow:
@@ -132,39 +177,101 @@ def fix_uptime(original: Workflow) -> Workflow:
     # A failed request has no Date header: use the run's own time (same HTTP-date format).
     _set_assignment(calc, "date", "={{ $json.headers?.date ?? $now.toUTC().toHTTP() }}")
 
-    # All sheet nodes use the spreadsheet created for the user at deploy time, addressed by tab name.
-    for name, tab in (
-        ("Get Sites", UPTIME_SITES_TAB),
-        ("Log Uptime Event", UPTIME_LOG_TAB),
-        ("Update Site Status", UPTIME_SITES_TAB),
-    ):
-        sheet_node = wj.node(wf, name)
-        sheet_node["parameters"]["documentId"] = {
-            "__rl": True,
-            "mode": "id",
-            "value": value("spreadsheet_id"),
-        }
-        sheet_node["parameters"]["sheetName"] = {"__rl": True, "mode": "name", "value": tab}
-        wj.set_credential_slot(sheet_node, "googleSheetsOAuth2Api", "google")
+    # Google Sheets goes through the demo's Google relay (Nango's proxy holds the user's tokens; n8n
+    # gets no Google credential), so the three Sheets nodes become HTTP calls to the Sheets API on
+    # the spreadsheet created for the user at deploy time.
+    for name in ("Get Sites", "Log Uptime Event", "Update Site Status"):
+        _require(wj.node(wf, name)["type"] == "n8n-nodes-base.googleSheets", f"{name} is not a Sheets node")
+    _require(wj.targets(wf, "Schedule Trigger") == ["Get Sites"], "uptime start changed")
+    get_sites = wj.node(wf, "Get Sites")
+    wj.insert_between(
+        wf,
+        "Schedule Trigger",
+        "Get Sites",
+        {
+            "id": wj.new_node_id(wf["name"], UPTIME_CONFIG_NODE),
+            "name": UPTIME_CONFIG_NODE,
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 3.4,
+            "position": wj.position_near(wj.node(wf, "Schedule Trigger"), dx=128),
+            "parameters": {
+                "assignments": {
+                    "assignments": [
+                        {
+                            "id": "google-api",
+                            "name": "googleApi",
+                            "type": "string",
+                            "value": value("google_api"),
+                        },
+                        {
+                            "id": "spreadsheet-id",
+                            "name": "spreadsheetId",
+                            "type": "string",
+                            "value": value("spreadsheet_id"),
+                        },
+                    ]
+                },
+                "options": {},
+            },
+        },
+    )
+    wj.insert_between(
+        wf,
+        UPTIME_CONFIG_NODE,
+        "Get Sites",
+        {
+            "id": wj.new_node_id(wf["name"], "Read Sites"),
+            "name": "Read Sites",
+            "position": list(get_sites["position"]),
+            **_relay_call("GET", f"={UPTIME_SHEET_URL}/values/{UPTIME_SITES_TAB}!A2:B"),
+        },
+    )
+    # The Sheets node made one item per row (with its row number); so does this.
+    _replace_node(
+        wf, "Get Sites", {"position": wj.position_near(get_sites, dx=152), **_code(UPTIME_SITES_JS)}
+    )
+
+    # Status Router -> Calculate Status items: one row per check in the Log tab.
+    log_row = ", ".join(f"$json.{column}" for column in UPTIME_LOG_COLUMNS)
+    log = wj.node(wf, "Log Uptime Event")
+    _replace_node(
+        wf,
+        "Log Uptime Event",
+        {
+            "position": log["position"],
+            **_relay_call(
+                "POST",
+                f"={UPTIME_SHEET_URL}/values/{UPTIME_LOG_TAB}!A:F:append",
+                query={"valueInputOption": "RAW", "insertDataOption": "INSERT_ROWS"},
+                body=f"={{{{ JSON.stringify({{ values: [[{log_row}]] }}) }}}}",
+            ),
+        },
+    )
 
     # Original wrote a placeholder column to a third tab, so a site's status never changed and a
-    # down site alerted on every run. Write the new status back to the site's row instead.
+    # down site alerted on every run. Write the new status into the site's own row instead.
+    status = "$('Calculate Status').item.json"
+    calc["parameters"]["assignments"]["assignments"].append(
+        {"id": "row-number", "name": "row_number", "type": "number", "value": "={{ $json.row_number }}"}
+    )
     update = wj.node(wf, "Update Site Status")
     _require(
         update["parameters"].get("operation") == "appendOrUpdate", "Update Site Status operation changed"
     )
-    status = "$('Calculate Status').item.json"
-    update["parameters"]["columns"] = {
-        "mappingMode": "defineBelow",
-        "value": {
-            "Property": f"={{{{ {status}.Property }}}}",
-            "Status": f"={{{{ ({status}.DOWN_FROM_UP || {status}.DOWN_FROM_DOWN) ? 'DOWN' : 'UP' }}}}",
+    new_status = f"({status}.DOWN_FROM_UP || {status}.DOWN_FROM_DOWN) ? 'DOWN' : 'UP'"
+    _replace_node(
+        wf,
+        "Update Site Status",
+        {
+            "position": update["position"],
+            **_relay_call(
+                "PUT",
+                f"={UPTIME_SHEET_URL}/values/{UPTIME_SITES_TAB}!B{{{{ {status}.row_number }}}}",
+                query={"valueInputOption": "RAW"},
+                body=f"={{{{ JSON.stringify({{ values: [[{new_status}]] }}) }}}}",
+            ),
         },
-        "matchingColumns": ["Property"],
-        "schema": [_sheet_column("Property"), _sheet_column("Status")],
-        "attemptToConvertTypes": False,
-        "convertFieldsToString": False,
-    }
+    )
 
     slack = wj.node(wf, "Send Chat Alert")
     # Alerts also fire for DOWN_FROM_DOWN and UP_FROM_DOWN; the text only knew DOWN_FROM_UP and
@@ -277,6 +384,39 @@ MEDIUM_MAX_ARTICLES = 5
 MEDIUM_READER_TIMEOUT_MS = 45_000
 MEDIUM_READER_NODE_TIMEOUT_MS = 60_000
 MEDIUM_LLM_TIMEOUT_MS = 60_000
+MEDIUM_MAX_MESSAGES = 20  # newest matching emails read per run (the 5 articles come from these)
+# Messages are read 5 at a time, a second apart: n8n would otherwise start all 20 reads at once.
+MEDIUM_READ_BATCH = {"batch": {"batchSize": 5, "batchInterval": 1000}}
+MEDIUM_GMAIL_NODE = "Find Medium Daily Digest emails"
+_MEDIUM_CONFIG = "$('Workflow configuration').first().json"
+_MEDIUM_WINDOW = "$('Build rolling 7-day window').first().json"
+MEDIUM_MESSAGE_IDS_JS = """\
+return ($input.first().json.messages || []).map((message) => ({ json: { id: message.id } }));
+"""
+# Gmail API messages (format=full), shaped like the Gmail node's output that "Extract article
+# links" reads: payload parts, numeric internalDate, date and subject from the headers.
+MEDIUM_MESSAGES_JS = """\
+return $input.all()
+  .map((item) => item.json)
+  .filter((message) => message.id && message.payload)
+  .map((message) => {
+    const headers = {};
+    for (const header of message.payload.headers || []) {
+      headers[String(header.name).toLowerCase()] = header.value;
+    }
+    return { json: {
+      id: message.id,
+      threadId: message.threadId,
+      labelIds: message.labelIds || [],
+      snippet: message.snippet || '',
+      internalDate: Number(message.internalDate) || 0,
+      date: headers.date || null,
+      subject: headers.subject || '',
+      from: headers.from || '',
+      payload: message.payload,
+    } };
+  });
+"""
 # Articles are processed one after another, so a run takes roughly 5 x (fetch + LLM). Typical runs
 # take 1-3 minutes; a worst case (every call hitting its timeout) can exceed n8n Cloud Starter's
 # 5-minute limit, which is why the Pro plan (40 minutes) is recommended.
@@ -318,17 +458,113 @@ def fix_medium_digest(original: Workflow) -> Workflow:
     llm["parameters"]["options"]["timeout"] = MEDIUM_LLM_TIMEOUT_MS
     wj.set_credential_slot(llm, "openAiApi", "openai")
 
-    gmail = wj.node(wf, "Find Medium Daily Digest emails")
-    wj.set_credential_slot(gmail, "gmailOAuth2", "google")
-    # An empty inbox must still reach "Build empty report" (via Extract article links → noArticles);
-    # without this n8n ends the run silently when Gmail finds nothing.
-    gmail["alwaysOutputData"] = True
+    _medium_gmail_through_relay(wf, config)
     slack = wj.node(wf, "Send report to Slack")
     _require(slack["parameters"].get("authentication") == "accessToken", "Slack node auth changed")
     wj.set_credential_slot(slack, "slackApi", "slack")
 
     _require(not wj.real_credential_refs(wf), "medium template still references original credentials")
     return wf
+
+
+def _medium_gmail_through_relay(wf: Workflow, config: wj.Node) -> None:
+    """Gmail goes through the demo's Google relay (Nango's proxy holds the user's tokens; n8n gets
+    no Google credential): search, then read each message, then shape them like the Gmail node."""
+    gmail = wj.node(wf, MEDIUM_GMAIL_NODE)
+    _require(gmail["type"] == "n8n-nodes-base.gmail", f"{MEDIUM_GMAIL_NODE} is not a Gmail node")
+    _require(gmail["parameters"].get("operation") == "getAll", "Gmail node operation changed")
+    _require(wj.targets(wf, "Build rolling 7-day window") == [MEDIUM_GMAIL_NODE], "Gmail input changed")
+    config["parameters"]["assignments"]["assignments"].append(
+        {"id": "google-api", "name": "googleApi", "type": "string", "value": value("google_api")}
+    )
+    window = wj.node(wf, "Build rolling 7-day window")
+    _require("gmailSearch" in window["parameters"]["jsCode"], "7-day window no longer sets gmailSearch")
+
+    def seconds(field: str) -> str:
+        return f"{{{{ Math.floor(new Date({_MEDIUM_WINDOW}.{field}).getTime() / 1000) }}}}"
+
+    messages_url = f"={{{{ {_MEDIUM_CONFIG}.googleApi }}}}/gmail/v1/users/me/messages"
+    x, y = gmail["position"]
+    for n in wf["nodes"]:  # make room for the four new nodes
+        if n is not gmail and n["position"][0] > x:
+            n["position"] = [n["position"][0] + 800, n["position"][1]]
+    wj.disconnect(wf, "Build rolling 7-day window", MEDIUM_GMAIL_NODE)
+    added = [
+        {
+            "name": "Search Gmail",
+            "position": [x, y],
+            **_relay_call(
+                "GET",
+                messages_url,
+                query={
+                    # The Gmail node's q + receivedAfter/receivedBefore filters.
+                    "q": f"={{{{ {_MEDIUM_WINDOW}.gmailSearch }}}} after:{seconds('receivedAfter')}"
+                    f" before:{seconds('receivedBefore')}",
+                    "maxResults": str(MEDIUM_MAX_MESSAGES),
+                },
+            ),
+        },
+        {
+            "name": "Found Gmail messages",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2.2,
+            "position": [x + 200, y],
+            "parameters": {
+                "conditions": {
+                    "options": {
+                        "caseSensitive": True,
+                        "leftValue": "",
+                        "typeValidation": "strict",
+                        "version": 2,
+                    },
+                    "conditions": [
+                        {
+                            "id": "found-messages",
+                            "leftValue": "={{ ($json.messages || []).length }}",
+                            "rightValue": 0,
+                            "operator": {"type": "number", "operation": "gt"},
+                        }
+                    ],
+                    "combinator": "and",
+                },
+                "options": {},
+            },
+        },
+        {"name": "Gmail message IDs", "position": [x + 400, y - 100], **_code(MEDIUM_MESSAGE_IDS_JS)},
+        {
+            "name": "Read Gmail message",
+            "position": [x + 600, y - 100],
+            # A failed read fails the run (as the Gmail node did) rather than giving an empty report.
+            **_relay_call("GET", f"{messages_url}/{{{{ $json.id }}}}", query={"format": "full"}),
+        },
+    ]
+    added[-1]["parameters"]["options"] = {"batching": MEDIUM_READ_BATCH}
+    for n in added:
+        wj.add_node(wf, {"id": wj.new_node_id(wf["name"], n["name"]), **n})
+    # The search result (no messages) also goes straight on, so an empty inbox still reaches
+    # "Build empty report" (via Extract article links -> noArticles); alwaysOutputData keeps n8n
+    # from ending the run silently when nothing is left.
+    _replace_node(
+        wf,
+        MEDIUM_GMAIL_NODE,
+        {"position": [x + 800, y], "alwaysOutputData": True, **_code(MEDIUM_MESSAGES_JS)},
+    )
+    wj.connect(wf, "Build rolling 7-day window", "Search Gmail")
+    wj.connect(wf, "Search Gmail", "Found Gmail messages")
+    wj.connect(wf, "Found Gmail messages", "Gmail message IDs", output=0)
+    wj.connect(wf, "Found Gmail messages", MEDIUM_GMAIL_NODE, output=1)
+    wj.connect(wf, "Gmail message IDs", "Read Gmail message")
+    wj.connect(wf, "Read Gmail message", MEDIUM_GMAIL_NODE)
+
+    # With alwaysOutputData an empty result is one empty item: count real messages only.
+    for name in ("Build Medium weekly report", "Build empty report"):
+        code = wj.node(wf, name)
+        code["parameters"]["jsCode"] = _replace_once(
+            code["parameters"]["jsCode"],
+            f"$('{MEDIUM_GMAIL_NODE}').all().length",
+            f"$('{MEDIUM_GMAIL_NODE}').all().filter((item) => item.json.id).length",
+            name,
+        )
 
 
 # ------------------------------------------------------------------------ github merge (Make)

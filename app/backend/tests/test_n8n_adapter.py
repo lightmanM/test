@@ -12,12 +12,17 @@ import respx
 from workflow_demo.adapters.base import AdapterError, DeployContext, OAuthTokens
 from workflow_demo.adapters.n8n import N8nAdapter, summarize_execution
 from workflow_demo.catalog.loader import load_catalog
+from workflow_demo.google import GoogleApi
 from workflow_demo.n8n.client import N8nClient, N8nError
 from workflow_demo.n8n.transform import RUN_HEADER, RUN_NODE_NAME
+from workflow_demo.nango import NangoClient
+from workflow_demo.relay_keys import KEY_REF, digest
 
 N8N = "https://n8n.test"
 API = f"{N8N}/api/v1"
-SHEETS = "https://sheets.googleapis.com/v4/spreadsheets"
+PROXY = "https://nango.test/proxy"  # Google calls go through Nango's proxy
+SHEETS = f"{PROXY}/v4/spreadsheets"
+DRIVE_FILES = f"{PROXY}/drive/v3/files"
 CATALOG = load_catalog()
 UPTIME_SETTINGS = {"slack_channel": "C0123ABCD", "sites": ["https://example.com", "https://bad.example"]}
 
@@ -28,16 +33,18 @@ class Creds:
     def __init__(self):
         self.calls = []
 
-    def oauth_tokens(self, connector, *, with_refresh_token=False):
-        self.calls.append((connector, with_refresh_token))
-        return OAuthTokens(
-            access_token=f"{connector}-access",
-            refresh_token=f"{connector}-refresh" if with_refresh_token else None,
-            scope="scope-a scope-b" if connector == "google" else None,
-        )
+    def oauth_tokens(self, connector):
+        self.calls.append(("oauth_tokens", connector))
+        return OAuthTokens(access_token=f"{connector}-access")
 
     def secret_value(self, connector):
         return f"{connector}-secret"
+
+    def google_api(self, connector):
+        self.calls.append(("google_api", connector))
+        return GoogleApi(
+            NangoClient("nango-secret", "https://nango.test", httpx.Client()), "conn-g", "google"
+        )
 
 
 @pytest.fixture
@@ -45,8 +52,7 @@ def adapter(make_settings):
     settings = make_settings(
         n8n_base_url=N8N,
         n8n_api_key="n8n-key",
-        google_client_id="gid.apps.googleusercontent.com",
-        google_client_secret="gsecret",
+        relay_base_url="http://demo.internal:8000/",
         openai_api_key="sk-owner",
         reader_base_url="https://reader.test/",
         reader_api_token="reader-token",
@@ -98,9 +104,12 @@ def test_deploy_uptime(adapter):
     creds = Creds()
     result = adapter.deploy(context("uptime-monitor", UPTIME_SETTINGS, creds=creds))
 
-    # Spreadsheet: Sites seeded from settings, Log header, created with the user's token.
+    # Spreadsheet: Sites seeded from settings, Log header, created as the user through Nango's proxy.
     sheet_body = json.loads(sheet.calls.last.request.content)
-    assert sheet.calls.last.request.headers["authorization"] == "Bearer google-access"
+    headers = sheet.calls.last.request.headers
+    assert headers["authorization"] == "Bearer nango-secret"
+    assert (headers["connection-id"], headers["provider-config-key"]) == ("conn-g", "google")
+    assert headers["base-url-override"] == "https://sheets.googleapis.com"
     sites_rows = sheet_body["sheets"][0]["data"][0]["rowData"]
     assert [r["values"][0]["userEnteredValue"]["stringValue"] for r in sites_rows] == [
         "Property",
@@ -108,27 +117,25 @@ def test_deploy_uptime(adapter):
         "https://bad.example",
     ]
 
-    # Credentials: Google with our OAuth client and the refresh token, Slack bot token, run-now header.
-    by_type = {b["type"]: b for b in bodies}
-    google = by_type["googleSheetsOAuth2Api"]["data"]
-    assert google["clientId"] == "gid.apps.googleusercontent.com" and google["clientSecret"] == "gsecret"
-    assert google["oauthTokenData"] == {
-        "access_token": "google-access",
-        "refresh_token": "google-refresh",
-        "token_type": "Bearer",
-        "scope": "scope-a scope-b",
-    }
-    assert by_type["slackApi"]["data"] == {"accessToken": "slack-access"}
-    assert ("google", True) in creds.calls and ("slack", False) in creds.calls
-    run_cred = by_type["httpHeaderAuth"]
-    assert run_cred["data"]["name"] == RUN_HEADER
+    # Credentials: the Google relay key (no Google token), Slack bot token, run-now header.
+    by_slot = {b["name"].rsplit(" · ", 1)[1]: b for b in bodies}
+    relay = by_slot["google"]
+    assert relay["type"] == "httpHeaderAuth" and relay["data"]["name"] == "Authorization"
+    relay_key = relay["data"]["value"].removeprefix("Bearer ")
+    assert relay_key.startswith("7.") and len(relay_key) > 40  # <deployment id>.<random>
+    assert by_slot["slack"]["data"] == {"accessToken": "slack-access"}
+    assert ("oauth_tokens", "google") not in creds.calls and ("oauth_tokens", "slack") in creds.calls
+    run_cred = by_slot["run now"]
+    assert run_cred["type"] == "httpHeaderAuth" and run_cred["data"]["name"] == RUN_HEADER
     assert all(b["name"].startswith("demo · alice · uptime-monitor · ") for b in bodies)
+    assert not [b for b in bodies if "oauth" in b["type"].lower()]
 
     # Workflow: filled in, credentials wired, run-now webhook, then published.
     wf = json.loads(created.calls.last.request.content)
     assert wf["name"] == "[demo] Website uptime monitor · alice"
     text = json.dumps(wf)
     assert "sheet-1" in text and "C0123ABCD" in text and "slot:" not in text
+    assert "http://demo.internal:8000/api/google-relay" in text and relay_key not in text
     run_node = next(n for n in wf["nodes"] if n["name"] == RUN_NODE_NAME)
     path = run_node["parameters"]["path"]
     assert run_cred["data"]["value"] == run_token(path)
@@ -144,12 +151,21 @@ def test_deploy_uptime(adapter):
         "spreadsheet_id": "sheet-1",
         "spreadsheet_url": "https://docs.google.com/s/sheet-1",
         "sites_written": UPTIME_SETTINGS["sites"],
+        KEY_REF: digest(relay_key),  # only the key's hash is kept
     }
+
+
+def mock_google_check(status=200, json=None):
+    """The deploy-time check that Nango can still use the Google connection."""
+    return respx.get(f"{PROXY}/oauth2/v3/userinfo").mock(
+        return_value=httpx.Response(status, json=json or {"email": "alice@acme.dev"})
+    )
 
 
 @respx.mock
 def test_meegle_and_medium_credentials(adapter):
     bodies = mock_credentials()
+    google_check = mock_google_check()
     respx.post(f"{API}/workflows").mock(return_value=httpx.Response(200, json={"id": "wf-2"}))
     respx.post(f"{API}/workflows/wf-2/publish").mock(return_value=httpx.Response(200, json={}))
 
@@ -167,7 +183,9 @@ def test_meegle_and_medium_credentials(adapter):
     adapter.deploy(context("medium-digest", {"slack_channel": "C0123ABCD", "llm_model": "gpt-4o"}))
     by_type = {b["type"]: b["data"] for b in bodies}
     assert by_type["openAiApi"] == {"apiKey": "sk-owner", "url": "https://api.openai.com/v1"}
-    assert by_type["gmailOAuth2"]["oauthTokenData"]["refresh_token"] == "google-refresh"
+    relay = next(b for b in bodies if b["name"].endswith("· google"))
+    assert relay["type"] == "httpHeaderAuth" and relay["data"]["value"].startswith("Bearer 7.")
+    assert google_check.call_count == 1  # Medium makes no other Google call at deploy
     reader = next(b for b in bodies if b["name"].endswith("· reader"))
     assert reader["data"] == {"name": "Authorization", "value": "Bearer reader-token"}
 
@@ -175,6 +193,7 @@ def test_meegle_and_medium_credentials(adapter):
 @respx.mock
 def test_medium_values_point_at_shared_services(adapter):
     mock_credentials()
+    mock_google_check()
     created = respx.post(f"{API}/workflows").mock(return_value=httpx.Response(200, json={"id": "wf-3"}))
     respx.post(f"{API}/workflows/wf-3/publish").mock(return_value=httpx.Response(200, json={}))
     adapter.deploy(context("medium-digest", {"slack_channel": "C0123ABCD", "llm_model": "gpt-4o"}))
@@ -209,9 +228,7 @@ def test_failed_deploy_removes_what_it_created(adapter):
         return_value=httpx.Response(400, json={"message": "request/body/nodes/0 has unknown property"})
     )
     deleted = respx.delete(url__regex=rf"{API}/credentials/cred-\d").mock(return_value=httpx.Response(200))
-    sheet_deleted = respx.delete("https://www.googleapis.com/drive/v3/files/s-9").mock(
-        return_value=httpx.Response(204)
-    )
+    sheet_deleted = respx.delete(f"{DRIVE_FILES}/s-9").mock(return_value=httpx.Response(204))
     with pytest.raises(AdapterError, match="unknown property"):
         adapter.deploy(context("uptime-monitor", UPTIME_SETTINGS))
     assert {c.request.url.path for c in deleted.calls} == {
@@ -235,13 +252,11 @@ def test_cleanup_continues_when_a_delete_fails(adapter, caplog):
     )
     respx.delete(f"{API}/workflows/wf-5").mock(return_value=httpx.Response(500, json={"message": "down"}))
     creds_deleted = respx.delete(url__regex=rf"{API}/credentials/.*").mock(return_value=httpx.Response(200))
-    respx.delete(url__regex=r"https://www.googleapis.com/drive/v3/files/.*").mock(
-        return_value=httpx.Response(204)
-    )
+    respx.delete(url__regex=rf"{DRIVE_FILES}/.*").mock(return_value=httpx.Response(204))
     with pytest.raises(AdapterError):
         adapter.deploy(context("uptime-monitor", UPTIME_SETTINGS))
     assert creds_deleted.call_count == 3
-    assert "workflow wf-5" in caplog.text and "google-access" not in caplog.text
+    assert "workflow wf-5" in caplog.text and "nango-secret" not in caplog.text
 
 
 @respx.mock
@@ -283,7 +298,7 @@ def test_redeploy_reuses_the_spreadsheet(adapter):
 
 
 @respx.mock
-def test_google_is_read_once_per_deploy(adapter):
+def test_google_tokens_are_never_read(adapter):
     respx.post(SHEETS).mock(
         return_value=httpx.Response(200, json={"spreadsheetId": "s", "spreadsheetUrl": "u"})
     )
@@ -292,7 +307,7 @@ def test_google_is_read_once_per_deploy(adapter):
     respx.post(f"{API}/workflows/wf-1/publish").mock(return_value=httpx.Response(200, json={}))
     creds = Creds()
     adapter.deploy(context("uptime-monitor", UPTIME_SETTINGS, creds=creds))
-    assert creds.calls == [("google", True), ("slack", False)]
+    assert [c for c in creds.calls if c[0] == "oauth_tokens"] == [("oauth_tokens", "slack")]
 
 
 def test_catalog_needs_only_supported_items(adapter):
@@ -324,12 +339,21 @@ def test_failed_publish_removes_the_workflow(adapter):
 @respx.mock
 def test_connection_problem_stops_before_n8n(adapter):
     class NoGoogle(Creds):
-        def oauth_tokens(self, connector, *, with_refresh_token=False):
+        def google_api(self, connector):
             raise AdapterError("Connect Google (Sheets and Gmail) first")
 
     credential_calls = respx.post(f"{API}/credentials")
     with pytest.raises(AdapterError, match="Connect Google"):
         adapter.deploy(context("uptime-monitor", UPTIME_SETTINGS, creds=NoGoogle()))
+    # The Medium digest needs a real Google connection too...
+    medium = {"slack_channel": "C0123ABCD", "llm_model": "gpt-4o"}
+    with pytest.raises(AdapterError, match="Connect Google"):
+        adapter.deploy(context("medium-digest", medium, creds=NoGoogle()))
+    # ...that Nango can still use (Google ends "Testing" sign-ins after 7 days).
+    refused = {"error": {"code": "server_error", "message": "Failed to get connection credentials: 'x'"}}
+    mock_google_check(400, refused)
+    with pytest.raises(AdapterError, match="Your Google connection has expired"):
+        adapter.deploy(context("medium-digest", medium))
     assert not credential_calls.called
 
 
@@ -338,10 +362,11 @@ def test_availability_lists_missing_configuration(make_settings):
     http = httpx.Client()
     adapter = N8nAdapter(settings, N8nClient(N8N, "k", http), http)
     assert adapter.check_available(CATALOG.workflow("meegle-daily-digest")).available
-    uptime = adapter.check_available(CATALOG.workflow("uptime-monitor"))
-    assert not uptime.available and "GOOGLE_CLIENT_ID" in uptime.reason
+    uptime = adapter.check_available(CATALOG.workflow("uptime-monitor"))  # no Google client needed...
+    assert not uptime.available and uptime.reason.endswith("(missing RELAY_BASE_URL)")  # ...only the relay
     medium = adapter.check_available(CATALOG.workflow("medium-digest"))
     assert "OPENAI_API_KEY" in medium.reason and "READER_BASE_URL" in medium.reason
+    assert "RELAY_BASE_URL" in medium.reason
     with pytest.raises(AdapterError, match="Not set up"):
         adapter.deploy(context("medium-digest", {"slack_channel": "C0123ABCD"}))
 
@@ -464,6 +489,21 @@ def test_summaries_for_text_reports():
     summary = summarize_execution(digest, ["Compose digest"]).summary
     assert summary.startswith("📊 日报") and len(summary) == 4000
     assert summarize_execution({"id": "7", "status": "canceled"}, []).error == "Canceled"
+
+
+def test_run_errors_include_the_apis_explanation():
+    error = {
+        "message": "Conflict - the request could not be completed",
+        "description": "Your Google connection has expired or was revoked. Reconnect it, then try again.",
+    }
+    execution = {"id": "8", "status": "error", "data": {"resultData": {"runData": {}, "error": error}}}
+    assert summarize_execution(execution, []).error == (
+        "Conflict - the request could not be completed: Your Google connection has expired or was "
+        "revoked. Reconnect it, then try again."
+    )
+    same = {"message": "Sheet not found", "description": "Sheet not found"}
+    execution["data"]["resultData"]["error"] = same
+    assert summarize_execution(execution, []).error == "Sheet not found"
 
 
 @respx.mock

@@ -28,15 +28,18 @@ try_it: |
 n8n:
   template: workflow.json
   values:
+    google_api: shared
     reader_url: shared
     llm_endpoint: shared
     llm_model: setting
     slack_channel: setting
   credentials:
-    google: {type: gmailOAuth2, source: connection, ref: google}
+    # Google calls go through the demo's relay and Nango's proxy; n8n gets no Google token.
+    google: {type: httpHeaderAuth, source: google_relay, ref: google}
     slack: {type: slackApi, source: connection, ref: slack}
     openai: {type: openAiApi, source: shared, ref: openai}
     reader: {type: httpHeaderAuth, source: shared, ref: reader}
+  google_apis: [gmail_read]
   result_nodes:
     - Build Medium weekly report
     - Build empty report

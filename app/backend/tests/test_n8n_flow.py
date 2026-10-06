@@ -14,6 +14,7 @@ N8N = "https://n8n.test"
 API = f"{N8N}/api/v1"
 KEY = base64.b64encode(b"k" * 32).decode()
 UPTIME = {"slack_channel": "C0123ABCD", "sites": ["https://example.com"]}
+SHEET = "1UptimeSheetId_0123456789abcdefghijklmnopq"
 
 
 @pytest.fixture
@@ -30,8 +31,7 @@ def real(make_settings):
         data_encryption_key=KEY,
         n8n_base_url=N8N,
         n8n_api_key="n8n-key",
-        google_client_id="gid",
-        google_client_secret="gsecret",
+        relay_base_url="http://demo.internal:8000",
     )
     svc = build_services(settings, runner_factory=InlineJobRunner)
     svc.db.create_all()
@@ -60,10 +60,10 @@ def connect(client, connector, connection_id, credentials):
 @respx.mock
 def test_uptime_deploy_run_and_delete(real):
     svc, client = real
-    respx.get("https://openidconnect.googleapis.com/v1/userinfo").mock(
+    respx.get(f"{NANGO}/proxy/oauth2/v3/userinfo").mock(
         return_value=httpx.Response(200, json={"email": "alice@acme.dev"})
     )
-    connect(client, "google", "g-1", {"access_token": "ya29", "refresh_token": "1//r", "raw": {"scope": "s"}})
+    connect(client, "google", "g-1", {"access_token": "ya29", "raw": {"scope": "s"}})
     connect(client, "slack", "s-1", {"access_token": "xoxb-1", "raw": {"team": {"name": "Acme"}}})
 
     catalog = {w["id"]: w for w in client.get("/api/workflows").json()}
@@ -72,10 +72,13 @@ def test_uptime_deploy_run_and_delete(real):
     assert "MAKE_BRIDGE_KEY_ID" in catalog["github-merge-slack"]["unavailable_reason"]
     assert not catalog["medium-digest"]["available"]  # no OpenAI key / reader yet
 
-    respx.post("https://sheets.googleapis.com/v4/spreadsheets").mock(
+    respx.post(f"{NANGO}/proxy/v4/spreadsheets").mock(
         return_value=httpx.Response(
             200,
-            json={"spreadsheetId": "sh-1", "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/sh-1"},
+            json={
+                "spreadsheetId": SHEET,
+                "spreadsheetUrl": f"https://docs.google.com/spreadsheets/d/{SHEET}",
+            },
         )
     )
     credentials = []
@@ -92,16 +95,36 @@ def test_uptime_deploy_run_and_delete(real):
     detail = client.get("/api/workflows/uptime-monitor").json()
     assert detail["deployment"]["status"] == "active", detail["deployment"]
     assert detail["deployment"]["links"] == [
-        {"label": "Your uptime spreadsheet", "url": "https://docs.google.com/spreadsheets/d/sh-1"}
+        {"label": "Your uptime spreadsheet", "url": f"https://docs.google.com/spreadsheets/d/{SHEET}"}
     ]
-    google = next(c for c in credentials if c["type"] == "googleSheetsOAuth2Api")
-    assert google["data"]["oauthTokenData"]["refresh_token"] == "1//r"
+    assert "ya29" not in json.dumps(credentials)  # n8n gets no Google token...
+    relay = next(c for c in credentials if c["name"].endswith("· google"))["data"]  # ...only a relay key
     assert next(c for c in credentials if c["type"] == "slackApi")["data"] == {"accessToken": "xoxb-1"}
     # Tokens are never stored by the demo, only the n8n IDs.
     with svc.db.session() as db:
         refs = db.query(Deployment).one().platform_refs
-        assert "ya29" not in json.dumps(refs) and "xoxb" not in json.dumps(refs)
+        text = json.dumps(refs)
+        assert "ya29" not in text and "xoxb" not in text and relay["value"].split(".")[1] not in text
         assert refs["credential_ids"] == ["c1", "c2", "c3"]
+
+    # The workflow reads its Sites tab the way n8n does: through the relay, then Nango's proxy.
+    values = respx.get(url__regex=rf"{NANGO}/proxy/v4/spreadsheets/{SHEET}/values/.*").mock(
+        return_value=httpx.Response(200, json={"values": [["https://example.com"]]})
+    )
+    sites = f"/api/google-relay/sheets/v4/spreadsheets/{SHEET}/values/Sites!A2:B"
+    resp = client.get(sites, headers={relay["name"]: relay["value"]})
+    assert resp.status_code == 200 and resp.json() == {"values": [["https://example.com"]]}
+    upstream = values.calls.last.request
+    assert (upstream.headers["connection-id"], upstream.headers["authorization"]) == (
+        "g-1",
+        "Bearer nango-secret",
+    )
+    assert (
+        client.get(
+            sites, headers={"Authorization": "Bearer 1.wrong-key-wrong-key-wrong-key-wrong"}
+        ).status_code
+        == 401
+    )
 
     respx.post(url__regex=rf"{N8N}/webhook/.*").mock(return_value=httpx.Response(200, json={}))
     assert client.post("/api/deployments/uptime-monitor/run").status_code == 202
@@ -124,6 +147,9 @@ def test_uptime_deploy_run_and_delete(real):
     assert client.delete("/api/deployments/uptime-monitor").status_code == 202
     assert client.get("/api/workflows/uptime-monitor").json()["deployment"]["status"] == "stopped"
     assert wf_deleted.called and cred_deleted.call_count == 3
+    # A deleted deployment's relay key no longer works.
+    resp = client.get(sites, headers={relay["name"]: relay["value"]})
+    assert resp.status_code == 401 and values.call_count == 1
 
 
 def test_n8n_settings_must_stay_literal(real):

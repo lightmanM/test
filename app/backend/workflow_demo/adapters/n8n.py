@@ -1,9 +1,10 @@
 """Deploy the n8n workflows (uptime monitor, Meegle digest, Medium digest) under the owner's account.
 
-Per deployment: the user's credentials are created in n8n (Google with our OAuth client so n8n can
-refresh tokens itself; Slack bot token; Meegle MCP header; owner-provided OpenAI and reader keys),
-the template is filled in and gets a header-authenticated "Run now" webhook, then the workflow is
-created and published. Results come from the workflow's executions.
+Per deployment: the user's credentials are created in n8n (Slack bot token; Meegle MCP header;
+owner-provided OpenAI and reader keys; a key to the demo's Google relay, which calls Google through
+Nango's proxy, so no Google token is ever given to n8n), the template is filled in and gets a
+header-authenticated "Run now" webhook, then the workflow is created and published. Results come
+from the workflow's executions.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from typing import Any
 
 import httpx
 
-from workflow_demo import google
+from workflow_demo import google, relay_keys
 from workflow_demo.adapters.base import (
     AdapterError,
     Availability,
@@ -66,6 +67,10 @@ def _secret(value: Any) -> str:
 SHARED_VALUES: dict[str, OwnerItem] = {
     "reader_url": OwnerItem(("reader_base_url",), lambda s: f"{s.reader_base_url.rstrip('/')}/extract"),
     "llm_endpoint": OwnerItem((), lambda s: f"{s.openai_base_url.rstrip('/')}/chat/completions"),
+    # Base of the Google relay ({google_api}/sheets/v4/..., {google_api}/gmail/v1/...).
+    "google_api": OwnerItem(
+        ("relay_base_url",), lambda s: f"{s.relay_base_url.rstrip('/')}{relay_keys.RELAY_PATH}"
+    ),
 }
 SHARED_CREDENTIALS: dict[str, OwnerItem] = {
     "openai": OwnerItem(
@@ -77,9 +82,6 @@ SHARED_CREDENTIALS: dict[str, OwnerItem] = {
         lambda s: {"name": "Authorization", "value": f"Bearer {_secret(s.reader_api_token)}"},
     ),
 }
-# Google credentials need our OAuth client so n8n can refresh the user's tokens.
-GOOGLE_TYPES = {"googleSheetsOAuth2Api", "gmailOAuth2"}
-GOOGLE_NEEDS = ("google_client_id", "google_client_secret")
 # `deploy` values the adapter produces while deploying.
 DEPLOY_VALUES = {"spreadsheet_id"}
 # Header each manual secret is sent in (the template's HTTP nodes use an httpHeaderAuth slot).
@@ -111,25 +113,26 @@ class _Created:
     workflow_id: str | None = None
     spreadsheet_id: str | None = None  # only set when this deploy created it
     spreadsheet_url: str | None = None
-    google_token: str | None = field(default=None, repr=False)
+    google: google.GoogleApi | None = field(default=None, repr=False)
 
 
 class _CachedSecrets:
-    """One Nango read per connector per deploy (a refresh-token read also serves plain reads)."""
+    """One Nango read per connector per deploy."""
 
     def __init__(self, inner: SecretReader) -> None:
         self._inner = inner
         self._tokens: dict[str, OAuthTokens] = {}
 
-    def oauth_tokens(self, connector: str, *, with_refresh_token: bool = False) -> OAuthTokens:
-        cached = self._tokens.get(connector)
-        if cached is None or (with_refresh_token and not cached.refresh_token):
-            cached = self._inner.oauth_tokens(connector, with_refresh_token=with_refresh_token)
-            self._tokens[connector] = cached
-        return cached
+    def oauth_tokens(self, connector: str) -> OAuthTokens:
+        if connector not in self._tokens:
+            self._tokens[connector] = self._inner.oauth_tokens(connector)
+        return self._tokens[connector]
 
     def secret_value(self, connector: str) -> str:
         return self._inner.secret_value(connector)
+
+    def google_api(self, connector: str) -> google.GoogleApi:
+        return self._inner.google_api(connector)
 
 
 class N8nAdapter:
@@ -176,11 +179,11 @@ class N8nAdapter:
                 needs.update(item.needs if item else ())
                 if item is None:
                     problems.add(f"support for shared credential {slot.ref!r}")
-            elif slot.type in GOOGLE_TYPES:
-                needs.update(GOOGLE_NEEDS)
+            elif slot.source is CredentialSource.GOOGLE_RELAY:
+                continue  # the relay key (checked by the catalog loader)
             elif slot.type == "httpHeaderAuth" and slot.ref not in SECRET_HEADERS:
                 problems.add(f"support for a {slot.ref} header credential")
-            elif slot.type not in GOOGLE_TYPES | {"slackApi", "httpHeaderAuth"}:
+            elif slot.type not in ("slackApi", "httpHeaderAuth"):
                 problems.add(f"support for {slot.type} credentials")
         unset = {name.upper() for name in needs if not getattr(self._settings, name, None)}
         return sorted(unset) + sorted(problems)
@@ -208,9 +211,17 @@ class N8nAdapter:
                     sheet = self._spreadsheet(ctx, secrets, created)
                     values[name] = sheet["spreadsheet_id"]
             credentials = {}
+            relay: dict[str, str] = {}
             for slot_name, slot in spec.credentials.items():
+                if slot.source is CredentialSource.GOOGLE_RELAY:
+                    if not sheet:  # making the spreadsheet already proved the connection works
+                        google.check_connection(secrets.google_api(slot.ref))
+                    key, relay[relay_keys.KEY_REF] = relay_keys.new_key(ctx.deployment_id)
+                    data = {"name": "Authorization", "value": f"Bearer {key}"}
+                else:
+                    data = self._credential_data(slot, secrets)
                 credentials[slot_name] = self._create_credential(
-                    created, f"{prefix} · {slot_name}", slot.type, self._credential_data(slot, secrets)
+                    created, f"{prefix} · {slot_name}", slot.type, data
                 )
             hook = None
             if entry.run_now:
@@ -243,6 +254,7 @@ class N8nAdapter:
             "credential_ids": created.credential_ids,
             "workflow_url": f"{self._client.base_url}/workflow/{created.workflow_id}",
             **sheet,
+            **relay,
         }
         if hook is not None:
             refs["webhook_path"] = hook.path
@@ -371,41 +383,25 @@ class N8nAdapter:
         ``sites`` setting. A reused sheet gets the form's list written into its Sites tab only when the
         list changed since it was last written (``sites_written``), so edits made in the sheet survive
         redeploys that don't touch the list."""
-        tokens = secrets.oauth_tokens("google", with_refresh_token=True)
+        api = secrets.google_api("google")
         sites = [str(site) for site in ctx.settings.get("sites") or []]
         previous = ctx.previous_refs.get("spreadsheet_id")
         if previous:
-            url = google.spreadsheet_url(self._http, tokens.access_token, str(previous))
+            url = google.spreadsheet_url(api, str(previous))
             if url:
                 if ctx.previous_refs.get("sites_written") != sites:  # also when not recorded yet
-                    google.replace_uptime_sites(self._http, tokens.access_token, str(previous), sites)
+                    google.replace_uptime_sites(api, str(previous), sites)
                 return {"spreadsheet_id": str(previous), "spreadsheet_url": url, "sites_written": sites}
         stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
-        sheet = google.create_uptime_sheet(
-            self._http, tokens.access_token, f"Uptime monitor (demo) {stamp}", sites
-        )
+        sheet = google.create_uptime_sheet(api, f"Uptime monitor (demo) {stamp}", sites)
         created.spreadsheet_id, created.spreadsheet_url = sheet.id, sheet.url
-        created.google_token = tokens.access_token
+        created.google = api
         return {"spreadsheet_id": sheet.id, "spreadsheet_url": sheet.url, "sites_written": sites}
 
     def _credential_data(self, slot: CredentialSlot, secrets: SecretReader) -> dict[str, Any]:
         s = self._settings
         if slot.source is CredentialSource.SHARED:
             return SHARED_CREDENTIALS[slot.ref].build(s)
-        if slot.type in GOOGLE_TYPES:
-            tokens = secrets.oauth_tokens(slot.ref, with_refresh_token=True)
-            token_data = {
-                "access_token": tokens.access_token,
-                "refresh_token": tokens.refresh_token,
-                "token_type": "Bearer",
-            }
-            if tokens.scope:
-                token_data["scope"] = tokens.scope
-            return {
-                "clientId": s.google_client_id,
-                "clientSecret": _secret(s.google_client_secret),
-                "oauthTokenData": token_data,
-            }
         if slot.type == "slackApi":
             return {"accessToken": secrets.oauth_tokens(slot.ref).access_token}
         if slot.type == "httpHeaderAuth":
@@ -432,8 +428,8 @@ class N8nAdapter:
         if failures:
             # IDs only: the names identify the user and workflow, and nothing secret is logged.
             log.warning("couldn't clean up after a failed n8n deploy: %s", "; ".join(failures))
-        if created.spreadsheet_id and created.google_token:
-            google.delete_file(self._http, created.google_token, created.spreadsheet_id)
+        if created.spreadsheet_id and created.google is not None:
+            google.delete_file(created.google, created.spreadsheet_id)
 
 
 # ---------------------------------------------------------------------- results
@@ -453,7 +449,13 @@ def summarize_execution(execution: dict[str, Any], result_nodes: list[str]) -> R
     if len(summary) > MAX_SUMMARY:
         summary = summary[: MAX_SUMMARY - 1] + "…"
     error = result.get("error") if isinstance(result.get("error"), dict) else {}
-    message = str(error["message"])[:500] if error.get("message") else None
+    message = str(error["message"]) if error.get("message") else None
+    # An HTTP node's error message is generic ("Forbidden - perhaps check your credentials?"); the
+    # API's own explanation (e.g. the Google relay's) is in the description.
+    description = error.get("description")
+    if message and isinstance(description, str) and description.strip() and description not in message:
+        message = f"{message}: {description.strip()}"
+    message = message[:500] if message else None
     if message is None and execution.get("status") == "canceled":
         message = "Canceled"
     return RunSummary(

@@ -69,6 +69,7 @@ def live_admin(make_settings):
         data_encryption_key=base64.b64encode(b"k" * 32).decode(),
         n8n_base_url="https://n8n.test",
         n8n_api_key="n8n-key",
+        relay_base_url="http://demo.internal:8000",
         openai_api_key="sk-x",
         reader_base_url="https://reader.test",
         reader_api_token="r",
@@ -89,13 +90,46 @@ def test_setup_check_with_live_services(live_admin):
     respx.get("https://n8n.test/api/v1/workflows").mock(return_value=httpx.Response(200, json={"data": []}))
     respx.get("https://api.openai.com/v1/models").mock(return_value=httpx.Response(401, json={}))
     respx.get("https://reader.test/healthz").mock(return_value=httpx.Response(200, json={"status": "ok"}))
+    respx.get("http://demo.internal:8000/api/google-relay/check").mock(
+        return_value=httpx.Response(401, json={"error": {"code": 401, "message": "Invalid Google relay key"}})
+    )
     checks = {c["name"]: c for c in live_admin.get("/api/admin/setup").json()["checks"]}
     assert checks["Nango"]["state"] == "error" and "google" in checks["Nango"]["detail"]
     assert checks["Encryption key"]["state"] == "ok"
     assert checks["n8n"]["state"] == "ok"
-    assert checks["Google OAuth client"]["state"] == "missing"
+    assert checks["Google relay"]["state"] == "ok"
+    assert "http://demo.internal:8000/api/google-relay" in checks["Google relay"]["detail"]
     assert checks["LLM API"]["state"] == "error" and "401" in checks["LLM API"]["detail"]
     assert checks["Medium reader"]["state"] == "ok"
     assert checks["Make Bridge"]["state"] == "missing"
     assert checks["Slack bot"]["state"] == "ok"
     assert "Mode" not in checks
+
+
+@respx.mock
+def test_setup_check_reports_a_relay_url_that_isnt_the_demo(live_admin):
+    # e.g. RELAY_BASE_URL left at the public address, where Caddy doesn't offer the relay.
+    respx.get("http://demo.internal:8000/api/google-relay/check").mock(
+        return_value=httpx.Response(404, text="nope")
+    )
+    respx.route().mock(return_value=httpx.Response(200, json={"data": []}))
+    checks = {c["name"]: c for c in live_admin.get("/api/admin/setup").json()["checks"]}
+    assert checks["Google relay"]["state"] == "error" and "404" in checks["Google relay"]["detail"]
+    assert "RELAY_BASE_URL" in checks["Google relay"]["detail"]
+
+
+@respx.mock
+def test_setup_check_without_relay_base_url(live_admin):
+    live_admin.app.state.services.settings.relay_base_url = None
+    respx.route().mock(return_value=httpx.Response(200, json={"data": []}))
+    checks = {c["name"]: c for c in live_admin.get("/api/admin/setup").json()["checks"]}
+    assert (
+        checks["Google relay"]["state"] == "missing" and "RELAY_BASE_URL" in checks["Google relay"]["detail"]
+    )
+
+
+def test_setup_check_reaches_the_real_relay(client, make_settings):
+    # The probe's expectation matches what the relay really answers without a key.
+    resp = client.get("/api/google-relay/check")
+    assert resp.status_code == 401
+    assert resp.json() == {"error": {"code": 401, "message": "Invalid Google relay key"}}

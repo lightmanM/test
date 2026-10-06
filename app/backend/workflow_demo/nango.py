@@ -29,15 +29,11 @@ class NangoConnection:
     provider_config_key: str
     provider: str | None
     tags: dict[str, str]
-    credentials: dict[str, Any]  # access_token, refresh_token?, expires_at?, raw
+    credentials: dict[str, Any]  # access_token, expires_at?, raw
 
     @property
     def access_token(self) -> str | None:
         return self.credentials.get("access_token")
-
-    @property
-    def refresh_token(self) -> str | None:
-        return self.credentials.get("refresh_token")
 
     @property
     def raw(self) -> dict[str, Any]:
@@ -94,21 +90,13 @@ class NangoClient:
             raise NangoError("Nango returned an unexpected connect session") from None
 
     def get_connection(
-        self,
-        connection_id: str,
-        integration: str,
-        *,
-        force_refresh: bool = False,
-        include_refresh_token: bool = False,
+        self, connection_id: str, integration: str, *, force_refresh: bool = False
     ) -> NangoConnection:
         """Read a connection. Nango refreshes an expired access token itself; ``force_refresh``
-        refreshes regardless. The refresh token is returned only with ``include_refresh_token``
-        (needed when another platform must refresh the token itself, e.g. n8n)."""
+        refreshes regardless. Nango leaves the refresh token out (it isn't requested)."""
         params = {"provider_config_key": integration}
         if force_refresh:
             params["force_refresh"] = "true"
-        if include_refresh_token:
-            params["refresh_token"] = "true"
         data = self._request("GET", _connection_path(connection_id), params=params)
         try:
             return NangoConnection(
@@ -120,6 +108,38 @@ class NangoClient:
             )
         except (KeyError, TypeError):
             raise NangoError("Nango returned an unexpected connection") from None
+
+    def proxy(
+        self,
+        method: str,
+        endpoint: str,
+        *,
+        connection_id: str,
+        integration: str,
+        base_url: str | None = None,
+        params: dict[str, Any] | list[tuple[str, str]] | None = None,
+        json: Any = None,
+        timeout: float = 30,
+    ) -> httpx.Response:
+        """Call the provider's API as the connection's user; Nango adds (and refreshes) the token.
+
+        ``endpoint`` is the path after the provider's base URL (``base_url`` replaces that base).
+        The response is the provider's, unchanged; errors from Nango itself (unknown connection,
+        refused refresh) also come back as a response, with a string ``error.code``."""
+        headers = {**self._headers, "Connection-Id": connection_id, "Provider-Config-Key": integration}
+        if base_url:
+            headers["Base-Url-Override"] = base_url
+        try:
+            return self._http.request(
+                method,
+                f"{self._host}/proxy/{endpoint.lstrip('/')}",
+                headers=headers,
+                params=params,
+                json=json,
+                timeout=timeout,
+            )
+        except httpx.HTTPError as exc:
+            raise NangoError(f"Nango is unreachable: {exc.__class__.__name__}") from None
 
     def delete_connection(self, connection_id: str, integration: str) -> None:
         try:

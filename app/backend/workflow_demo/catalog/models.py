@@ -62,6 +62,14 @@ class ValueSource(StrEnum):
 class CredentialSource(StrEnum):
     CONNECTION = "connection"  # built from the user's connection
     SHARED = "shared"  # one credential shared by every deployment (owner-provided key)
+    # The deployment's key to the demo's Google relay, which calls Google through Nango's proxy as
+    # the user's connection (ref) and only for the deployment's `google_apis`.
+    GOOGLE_RELAY = "google_relay"
+
+
+class GoogleAccess(StrEnum):
+    SHEETS = "sheets"  # read and write cells of the spreadsheet created for the deployment
+    GMAIL_READ = "gmail_read"  # search and read messages
 
 
 class CredentialSlot(Strict):
@@ -79,6 +87,7 @@ class N8nSpec(Strict):
     template: str = "workflow.json"
     values: dict[str, ValueSource] = Field(default_factory=dict)
     credentials: dict[str, CredentialSlot] = Field(default_factory=dict)
+    google_apis: list[GoogleAccess] = Field(default_factory=list)  # what a google_relay slot may call
     result_nodes: list[str] = Field(default_factory=list)  # nodes whose output is shown as the run result
 
 

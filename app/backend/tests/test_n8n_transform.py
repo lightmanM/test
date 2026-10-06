@@ -23,6 +23,7 @@ N8N_ENTRIES = [e for e in CATALOG.workflows if e.platform is Platform.N8N]
 SAMPLE = {
     "slack_channel": "C0123ABCD",
     "spreadsheet_id": "sheet-123",
+    "google_api": "http://demo.internal:8000/api/google-relay",
     "meegle_project_key": "proj",
     "meegle_simple_name": "space",
     "window_hours": 720,
@@ -87,7 +88,11 @@ def test_values_keep_their_type():
 
 def test_uptime_sheet_and_channel_are_filled_in():
     wf = build(CATALOG.workflow("uptime-monitor"))
-    assert wj.node(wf, "Get Sites")["parameters"]["documentId"]["value"] == "sheet-123"
+    config = wj.node(wf, "Spreadsheet")["parameters"]["assignments"]["assignments"]
+    assert {a["name"]: a["value"] for a in config} == {
+        "googleApi": "http://demo.internal:8000/api/google-relay",
+        "spreadsheetId": "sheet-123",
+    }
     assert wj.node(wf, "Send Chat Alert")["parameters"]["channelId"]["value"] == "C0123ABCD"
 
 

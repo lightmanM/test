@@ -61,15 +61,25 @@ def test_uptime_fix(originals):
     assert "$json.Status === 'DOWN'" in calc["UP_FROM_DOWN"]
     assert "$json.Status === 'DOWN'" in calc["DOWN_FROM_DOWN"]
 
-    for name, tab in (("Get Sites", "Sites"), ("Log Uptime Event", "Log"), ("Update Site Status", "Sites")):
+    # No Google node is left: Sheets calls go through the demo's Google relay.
+    assert not [n for n in wf["nodes"] if n["type"].startswith("n8n-nodes-base.google")]
+    config = {
+        a["name"]: a["value"] for a in wj.node(wf, "Spreadsheet")["parameters"]["assignments"]["assignments"]
+    }
+    assert config == {"googleApi": "__VALUE:google_api__", "spreadsheetId": "__VALUE:spreadsheet_id__"}
+    assert wj.targets(wf, "Schedule Trigger") == ["Spreadsheet"]
+    assert wj.targets(wf, "Spreadsheet") == ["Read Sites"]
+    assert wj.targets(wf, "Read Sites") == ["Get Sites"]
+    assert wj.targets(wf, "Get Sites") == ["For Each Site..."]
+    assert wj.targets(wf, "Log Uptime Event") == ["Update Site Status"]
+    assert wj.targets(wf, "Update Site Status") == ["For Each Site..."]
+    for name in ("Read Sites", "Log Uptime Event", "Update Site Status"):
         params = wj.node(wf, name)["parameters"]
-        assert params["documentId"] == {"__rl": True, "mode": "id", "value": "__VALUE:spreadsheet_id__"}
-        assert params["sheetName"]["value"] == tab
-
-    columns = wj.node(wf, "Update Site Status")["parameters"]["columns"]
-    assert columns["matchingColumns"] == ["Property"]
-    assert set(columns["value"]) == {"Property", "Status"}
-    assert "'DOWN' : 'UP'" in columns["value"]["Status"]
+        assert params["authentication"] == "genericCredentialType", name
+        assert params["genericAuthType"] == "httpHeaderAuth", name
+    for name in ("Spreadsheet", "Read Sites", "Get Sites"):  # stable ids for added/replaced nodes
+        assert wj.node(wf, name)["id"]
+    assert wj.node(wf, "Get Sites")["id"] == wj.node(originals["uptime-monitor"], "Get Sites")["id"]
 
     slack = wj.node(wf, "Send Chat Alert")
     assert slack["parameters"]["authentication"] == "accessToken"
@@ -77,9 +87,9 @@ def test_uptime_fix(originals):
     assert "'still DOWN' : 'back UP'" in slack["parameters"]["text"]
     assert sorted(wj.credential_slots(wf)) == sorted(
         [
-            ("Get Sites", "googleSheetsOAuth2Api", "google"),
-            ("Log Uptime Event", "googleSheetsOAuth2Api", "google"),
-            ("Update Site Status", "googleSheetsOAuth2Api", "google"),
+            ("Read Sites", "httpHeaderAuth", "google"),
+            ("Log Uptime Event", "httpHeaderAuth", "google"),
+            ("Update Site Status", "httpHeaderAuth", "google"),
             ("Send Chat Alert", "slackApi", "slack"),
         ]
     )
@@ -140,8 +150,24 @@ def test_medium_digest_fix(originals):
         "llmEndpoint": "__VALUE:llm_endpoint__",
         "llmModel": "__VALUE:llm_model__",
         "slackChannel": "__VALUE:slack_channel__",
+        "googleApi": "__VALUE:google_api__",
     }
-    assert {s for _, _, s in wj.credential_slots(wf)} == {"google", "slack", "openai", "reader"}
+    # Gmail goes through the demo's Google relay: search, read each message, reshape.
+    assert not [n for n in wf["nodes"] if n["type"] == "n8n-nodes-base.gmail"]
+    assert wj.targets(wf, "Build rolling 7-day window") == ["Search Gmail"]
+    assert wj.targets(wf, "Search Gmail") == ["Found Gmail messages"]
+    assert wj.targets(wf, "Found Gmail messages", output=0) == ["Gmail message IDs"]
+    assert wj.targets(wf, "Found Gmail messages", output=1) == ["Find Medium Daily Digest emails"]
+    assert wj.targets(wf, "Gmail message IDs") == ["Read Gmail message"]
+    assert wj.targets(wf, "Read Gmail message") == ["Find Medium Daily Digest emails"]
+    assert wj.targets(wf, "Find Medium Daily Digest emails") == ["Extract article links"]
+    assert sorted(wj.credential_slots(wf)) == [
+        ("Classify and summarize article", "openAiApi", "openai"),
+        ("Fetch article through Freedium", "httpHeaderAuth", "reader"),
+        ("Read Gmail message", "httpHeaderAuth", "google"),
+        ("Search Gmail", "httpHeaderAuth", "google"),
+        ("Send report to Slack", "slackApi", "slack"),
+    ]
     assert_no_secrets(wf)
 
 
@@ -150,6 +176,10 @@ def test_medium_digest_reports_an_empty_inbox(originals):
     # "Build empty report" branch (reached through Extract article links → noArticles) never runs.
     wf = fixes.fix_medium_digest(originals["medium-digest"])
     assert wj.node(wf, "Find Medium Daily Digest emails").get("alwaysOutputData") is True
+    # ...and that empty item isn't counted as an email.
+    for name in ("Build Medium weekly report", "Build empty report"):
+        code = wj.node(wf, name)["parameters"]["jsCode"]
+        assert "$('Find Medium Daily Digest emails').all().filter((item) => item.json.id).length" in code
 
 
 def test_github_blueprint_fix(originals):
