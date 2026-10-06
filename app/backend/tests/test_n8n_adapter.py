@@ -357,6 +357,27 @@ def test_connection_problem_stops_before_n8n(adapter):
     assert not credential_calls.called
 
 
+@pytest.mark.parametrize(
+    ("status", "message", "expected"),
+    [
+        (401, "Invalid Credentials", "Your Google connection has expired"),
+        (403, "Insufficient scopes", "Google connection check error 403: Insufficient scopes"),
+        (503, "Service unavailable", "Google connection check error 503: Service unavailable"),
+    ],
+)
+@respx.mock
+def test_google_provider_error_stops_medium_before_n8n(adapter, status, message, expected):
+    mock_google_check(status, {"error": {"code": status, "message": message}})
+    bodies = mock_credentials()
+    created = respx.post(f"{API}/workflows").mock(return_value=httpx.Response(200, json={"id": "wf-1"}))
+    published = respx.post(f"{API}/workflows/wf-1/publish").mock(return_value=httpx.Response(200, json={}))
+
+    with pytest.raises(AdapterError, match=expected):
+        adapter.deploy(context("medium-digest", {"slack_channel": "C0123ABCD", "llm_model": "gpt-4o"}))
+
+    assert not bodies and not created.called and not published.called
+
+
 def test_availability_lists_missing_configuration(make_settings):
     settings = make_settings(n8n_base_url=N8N, n8n_api_key="k")
     http = httpx.Client()

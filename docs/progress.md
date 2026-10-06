@@ -246,6 +246,11 @@ tests.
 | 2026-10-04 | Leaked Meegle token removed from git history (2 commits rewritten; `main` now at e7c40dc). Owner to revoke the token in Meegle. |
 
 ## Session log
+- 2026-10-06: Google connection-check fix: forwarded Google HTTP 401 now asks to reconnect; other failed
+  checks retain the provider status/message and stop Medium before any n8n resource is created. Three
+  regression cases failed before the fix and pass after it; 193 backend tests, lint/format and catalog
+  checks pass. Independent review and AWS relay rollout follow; the existing user deployments are already
+  stopped and n8n lists zero workflows and zero credentials.
 - 2026-10-06: Google through Nango: Nango proxy client, backend Google calls through it, the Google relay for n8n, uptime + Medium templates rewritten onto it (JS run in tests), settings/setup check/docs updated; PR #15 reviewed (7 minor findings fixed); 190 backend tests.
 - 2026-10-04: Tester bug (uptime): a site that doesn't answer (e.g. a timeout) made "Perform Site Test" throw, failing the run with no alert (also in the team's template). The check now continues on error with a 15 s timeout, no response counts as DOWN, and the log date falls back to the run time. Verified live; 170 backend tests.
 - 2026-10-04: Tester bug (uptime): changing "Websites to monitor" and redeploying kept the old sites — the redeploy reused the spreadsheet and ignored the list. Now the list is written into the Sites tab when it changed since it was last written (`sites_written` ref; older deployments rewrite once); unchanged lists keep edits made in the sheet. Verified live; 169 backend tests.
