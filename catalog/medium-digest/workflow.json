@@ -39,6 +39,12 @@
               "name": "slackChannel",
               "type": "string",
               "value": "__VALUE:slack_channel__"
+            },
+            {
+              "id": "google-api",
+              "name": "googleApi",
+              "type": "string",
+              "value": "__VALUE:google_api__"
             }
           ]
         },
@@ -68,34 +74,19 @@
       ]
     },
     {
-      "parameters": {
-        "authentication": "oAuth2",
-        "resource": "message",
-        "operation": "getAll",
-        "returnAll": true,
-        "simple": false,
-        "filters": {
-          "q": "={{ $('Build rolling 7-day window').first().json.gmailSearch }}",
-          "readStatus": "both",
-          "receivedAfter": "={{ $('Build rolling 7-day window').first().json.receivedAfter }}",
-          "receivedBefore": "={{ $('Build rolling 7-day window').first().json.receivedBefore }}"
-        }
-      },
       "id": "4b3b5f20-4a54-4a8d-a52e-5c8b1c0bb004",
       "name": "Find Medium Daily Digest emails",
-      "type": "n8n-nodes-base.gmail",
-      "typeVersion": 2.1,
       "position": [
-        680,
+        1480,
         0
       ],
-      "credentials": {
-        "gmailOAuth2": {
-          "id": "slot:google",
-          "name": "google"
-        }
-      },
-      "alwaysOutputData": true
+      "alwaysOutputData": true,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return $input.all()\n  .map((item) => item.json)\n  .filter((message) => message.id && message.payload)\n  .map((message) => {\n    const headers = {};\n    for (const header of message.payload.headers || []) {\n      headers[String(header.name).toLowerCase()] = header.value;\n    }\n    return { json: {\n      id: message.id,\n      threadId: message.threadId,\n      labelIds: message.labelIds || [],\n      snippet: message.snippet || '',\n      internalDate: Number(message.internalDate) || 0,\n      date: headers.date || null,\n      subject: headers.subject || '',\n      from: headers.from || '',\n      payload: message.payload,\n    } };\n  });\n"
+      }
     },
     {
       "parameters": {
@@ -107,7 +98,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        920,
+        1720,
         0
       ]
     },
@@ -140,7 +131,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1160,
+        1960,
         0
       ]
     },
@@ -162,7 +153,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1400,
+        2200,
         -120
       ],
       "retryOnFail": true,
@@ -205,7 +196,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1640,
+        2440,
         -120
       ]
     },
@@ -219,7 +210,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1880,
+        2680,
         -220
       ]
     },
@@ -241,7 +232,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2120,
+        2920,
         -220
       ],
       "retryOnFail": true,
@@ -265,7 +256,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2360,
+        3160,
         -220
       ]
     },
@@ -279,7 +270,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1880,
+        2680,
         20
       ]
     },
@@ -292,35 +283,35 @@
       "type": "n8n-nodes-base.merge",
       "typeVersion": 2.1,
       "position": [
-        2600,
+        3400,
         -120
       ]
     },
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const articles = $input.all().map((item) => item.json)\n  .sort((left, right) => {\n    const leftTime = Number(left.emailTimestamp) || Date.parse(left.emailDate || '') || 0;\n    const rightTime = Number(right.emailTimestamp) || Date.parse(right.emailDate || '') || 0;\n    return rightTime - leftTime;\n  });\nconst relevant = articles.filter((article) => article.relevant === true);\nconst byTopic = new Map();\nfor (const article of relevant) {\n  for (const topic of article.topics || []) {\n    if (!byTopic.has(topic)) byTopic.set(topic, []);\n    byTopic.get(topic).push(article);\n  }\n}\n\nconst sections = [];\nfor (const [topic, topicArticles] of byTopic) {\n  sections.push(`\\n## ${topic}\\n${topicArticles.map((article) => {\n    const repos = (article.github_repositories || []).map((repo) => `\\n  - GitHub: ${repo.name || repo.url} - ${repo.url}`).join('');\n    return `### ${article.title}\\n${article.summary || 'No summary'}\\n\\n${article.why_relevant || ''}\\n\\nSource: ${article.sourceUrl}${repos}`;\n  }).join('\\n\\n')}`);\n}\n\nconst failed = articles.filter((article) => article.contentStatus === 'failed');\nconst window = $('Build rolling 7-day window').first().json;\nconst emailCount = $('Find Medium Daily Digest emails').all().length;\nconst report = `# Medium Digest report\\n\\nWindow: ${window.windowLabel}\\nGmail messages matched: ${emailCount}\\nProcessed ${articles.length} articles; ${relevant.length} matched your topics.${sections.join('') || '\\nNo relevant articles found in the 7-day window.'}\\n\\n_Articles with unavailable full text: ${failed.length}._`;\nreturn [{ json: { report, emailCount, processed: articles.length, relevant: relevant.length, failed: failed.length } }];\n"
+        "jsCode": "const articles = $input.all().map((item) => item.json)\n  .sort((left, right) => {\n    const leftTime = Number(left.emailTimestamp) || Date.parse(left.emailDate || '') || 0;\n    const rightTime = Number(right.emailTimestamp) || Date.parse(right.emailDate || '') || 0;\n    return rightTime - leftTime;\n  });\nconst relevant = articles.filter((article) => article.relevant === true);\nconst byTopic = new Map();\nfor (const article of relevant) {\n  for (const topic of article.topics || []) {\n    if (!byTopic.has(topic)) byTopic.set(topic, []);\n    byTopic.get(topic).push(article);\n  }\n}\n\nconst sections = [];\nfor (const [topic, topicArticles] of byTopic) {\n  sections.push(`\\n## ${topic}\\n${topicArticles.map((article) => {\n    const repos = (article.github_repositories || []).map((repo) => `\\n  - GitHub: ${repo.name || repo.url} - ${repo.url}`).join('');\n    return `### ${article.title}\\n${article.summary || 'No summary'}\\n\\n${article.why_relevant || ''}\\n\\nSource: ${article.sourceUrl}${repos}`;\n  }).join('\\n\\n')}`);\n}\n\nconst failed = articles.filter((article) => article.contentStatus === 'failed');\nconst window = $('Build rolling 7-day window').first().json;\nconst emailCount = $('Find Medium Daily Digest emails').all().filter((item) => item.json.id).length;\nconst report = `# Medium Digest report\\n\\nWindow: ${window.windowLabel}\\nGmail messages matched: ${emailCount}\\nProcessed ${articles.length} articles; ${relevant.length} matched your topics.${sections.join('') || '\\nNo relevant articles found in the 7-day window.'}\\n\\n_Articles with unavailable full text: ${failed.length}._`;\nreturn [{ json: { report, emailCount, processed: articles.length, relevant: relevant.length, failed: failed.length } }];\n"
       },
       "id": "4b3b5f20-4a54-4a8d-a52e-5c8b1c0bb014",
       "name": "Build Medium weekly report",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2840,
+        3640,
         -120
       ]
     },
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const window = $('Build rolling 7-day window').first().json;\nconst emailCount = $('Find Medium Daily Digest emails').all().length;\nreturn [{ json: {\n  report: `# Medium Digest report\\n\\nWindow: ${window.windowLabel}\\nGmail messages matched: ${emailCount}\\nNo Medium article links were found in the 7-day email window.`,\n  emailCount,\n} }];\n"
+        "jsCode": "const window = $('Build rolling 7-day window').first().json;\nconst emailCount = $('Find Medium Daily Digest emails').all().filter((item) => item.json.id).length;\nreturn [{ json: {\n  report: `# Medium Digest report\\n\\nWindow: ${window.windowLabel}\\nGmail messages matched: ${emailCount}\\nNo Medium article links were found in the 7-day email window.`,\n  emailCount,\n} }];\n"
       },
       "id": "4b3b5f20-4a54-4a8d-a52e-5c8b1c0bb015",
       "name": "Build empty report",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1400,
+        2200,
         180
       ]
     },
@@ -346,13 +337,129 @@
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2.7,
       "position": [
-        3080,
+        3880,
         -20
       ],
       "credentials": {
         "slackApi": {
           "id": "slot:slack",
           "name": "slack"
+        }
+      }
+    },
+    {
+      "id": "cfc0c7e0-cc0f-519c-ab07-3c1fdf6f00bb",
+      "name": "Search Gmail",
+      "position": [
+        680,
+        0
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Workflow configuration').first().json.googleApi }}/gmail/v1/users/me/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $('Build rolling 7-day window').first().json.gmailSearch }} after:{{ Math.floor(new Date($('Build rolling 7-day window').first().json.receivedAfter).getTime() / 1000) }} before:{{ Math.floor(new Date($('Build rolling 7-day window').first().json.receivedBefore).getTime() / 1000) }}"
+            },
+            {
+              "name": "maxResults",
+              "value": "20"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "slot:google",
+          "name": "google"
+        }
+      }
+    },
+    {
+      "id": "6caa8629-2b30-57bf-b19e-8f05b09d6e20",
+      "name": "Found Gmail messages",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "found-messages",
+              "leftValue": "={{ ($json.messages || []).length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "748a7334-6f38-508b-93b0-020aad1559e8",
+      "name": "Gmail message IDs",
+      "position": [
+        1080,
+        -100
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return ($input.first().json.messages || []).map((message) => ({ json: { id: message.id } }));\n"
+      }
+    },
+    {
+      "id": "c18a150b-3b9a-5176-84ba-133283cc1c3e",
+      "name": "Read Gmail message",
+      "position": [
+        1280,
+        -100
+      ],
+      "onError": "continueRegularOutput",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Workflow configuration').first().json.googleApi }}/gmail/v1/users/me/messages/{{ $json.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "format",
+              "value": "full"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "slot:google",
+          "name": "google"
         }
       }
     }
@@ -527,6 +634,57 @@
       ]
     },
     "Build rolling 7-day window": {
+      "main": [
+        [
+          {
+            "node": "Search Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Gmail": {
+      "main": [
+        [
+          {
+            "node": "Found Gmail messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Found Gmail messages": {
+      "main": [
+        [
+          {
+            "node": "Gmail message IDs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Find Medium Daily Digest emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail message IDs": {
+      "main": [
+        [
+          {
+            "node": "Read Gmail message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Gmail message": {
       "main": [
         [
           {

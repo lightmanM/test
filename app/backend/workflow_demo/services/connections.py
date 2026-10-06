@@ -12,10 +12,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from workflow_demo import google
 from workflow_demo.adapters.base import AdapterError, OAuthTokens
 from workflow_demo.catalog.models import Connector, ConnectorKind
 from workflow_demo.crypto import CryptoError
 from workflow_demo.db import Connection, User
+from workflow_demo.google import GoogleApi
 from workflow_demo.nango import NangoConnection, NangoError
 from workflow_demo.services.container import AppServices
 
@@ -165,38 +167,26 @@ def describe(svc: AppServices, connector_id: str, conn: NangoConnection) -> dict
             "bot_user_id": raw.get("bot_user_id"),
         }
     if connector_id == "google":
-        email = _google_email(svc, conn.access_token)
+        # Through Nango's proxy: Google tokens are never read out of Nango.
+        email = google.user_email(GoogleApi(_nango(svc), conn.connection_id, conn.provider_config_key))
         return {"label": email or "Google account", "email": email}
     return {"label": conn.provider or connector_id}
 
 
-def _google_email(svc: AppServices, access_token: str | None) -> str | None:
-    if not access_token:
-        return None
-    try:
-        resp = svc.http.get(
-            "https://openidconnect.googleapis.com/v1/userinfo",
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        return resp.json().get("email") if resp.status_code == 200 else None
-    except (httpx.HTTPError, ValueError):
-        return None
+def google_api(svc: AppServices, record: Connection) -> GoogleApi:
+    """Google calls for this connection, through Nango's proxy."""
+    if record.method != "nango" or not record.nango_connection_id or not record.nango_integration:
+        raise ConnectionError_(f"{record.connector} isn't connected through Nango")
+    return GoogleApi(_nango(svc), record.nango_connection_id, record.nango_integration)
 
 
-def fresh_credentials(
-    svc: AppServices, record: Connection, *, include_refresh_token: bool = False
-) -> NangoConnection:
-    """The connection with a valid access token (Nango refreshes expired ones); used by deploys.
-
-    ``include_refresh_token`` only when another platform must refresh the token itself (n8n)."""
+def fresh_credentials(svc: AppServices, record: Connection) -> NangoConnection:
+    """The connection with a valid access token (Nango refreshes expired ones), e.g. Slack's bot
+    token for deploys. The refresh token is never requested."""
     if record.method != "nango":
         raise ConnectionError_(f"{record.connector} isn't connected through Nango")
     try:
-        return _nango(svc).get_connection(
-            record.nango_connection_id,
-            record.nango_integration,
-            include_refresh_token=include_refresh_token,
-        )
+        return _nango(svc).get_connection(record.nango_connection_id, record.nango_integration)
     except NangoError as exc:
         if exc.code == "invalid_credentials":
             # The provider refused the refresh (revoked, or Google's 7-day limit for "Testing" apps).
@@ -225,21 +215,21 @@ class UserCredentials:
         found = self._svc.catalog.connectors.get(connector_id)
         return found.name if found else connector_id
 
-    def oauth_tokens(self, connector: str, *, with_refresh_token: bool = False) -> OAuthTokens:
+    def oauth_tokens(self, connector: str) -> OAuthTokens:
         record = self._real(connector)
         try:
-            conn = fresh_credentials(self._svc, record, include_refresh_token=with_refresh_token)
+            conn = fresh_credentials(self._svc, record)
         except ConnectionError_ as exc:
             raise AdapterError(exc.message) from None
         if not conn.access_token:
             raise AdapterError(f"Your {self._name(connector)} connection has no access token; reconnect it")
-        if with_refresh_token and not conn.refresh_token:
-            raise AdapterError(f"Your {self._name(connector)} connection can't be refreshed; reconnect it")
-        return OAuthTokens(
-            access_token=conn.access_token,
-            refresh_token=conn.refresh_token if with_refresh_token else None,
-            scope=conn.raw.get("scope"),
-        )
+        return OAuthTokens(access_token=conn.access_token, scope=conn.raw.get("scope"))
+
+    def google_api(self, connector: str) -> GoogleApi:
+        try:
+            return google_api(self._svc, self._real(connector))
+        except ConnectionError_ as exc:
+            raise AdapterError(exc.message) from None
 
     def secret_value(self, connector: str) -> str:
         try:

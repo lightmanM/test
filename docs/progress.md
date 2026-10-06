@@ -5,8 +5,10 @@ Living document. Update at the end of every work session and every PR.
 ## Current status
 - **Phase**: P0–P6 done; P7 live on AWS (2026-10-04; address in the git-ignored `deploy/aws/.env`).
   Setup check green except Make Bridge; 4 of 5 workflows available and live-tested.
-- **Next step**: finish the live checklist (`docs/go-live.md` §6): Slack bot (owner's Meegle user key), redeploy/delete
-  of each, second tester, short-TTL expiry; then open the PR for the AWS move and mark P7 done.
+- **Next step**: roll out "Google through Nango" on the server (`docs/go-live.md`, Operations: add
+  `RELAY_BASE_URL=http://demo:8000`, deploy, setup check, redeploy uptime + Medium and run each); then finish the
+  live checklist (`docs/go-live.md` §6): Slack bot (owner's Meegle user key), redeploy/delete of each, second tester,
+  short-TTL expiry; mark P7 done.
 - **Blocked**: GitHub merge → Slack — Make discontinued Bridge (<https://f.make.com/bridge>); left "Deploy unavailable".
 
 ## Phases and PRs
@@ -22,6 +24,7 @@ Living document. Update at the end of every work session and every PR.
 | P5 Make Bridge | [#7](https://github.com/lightmanM/test/pull/7) | merged | Bridge adapter, popup + callback, unavailable state |
 | P6 Lifecycle & admin | [#8](https://github.com/lightmanM/test/pull/8) | merged | 24 h sweeper, redeploy/delete, admin page, setup check, E2E |
 | P7 Go live | [#9](https://github.com/lightmanM/test/pull/9) | packaging merged; live part waits on owner | Modal + Neon deploy, owner credentials, live checklist |
+| Google through Nango | (this PR) | in review | Google calls via Nango's proxy; n8n's via the demo's Google relay |
 
 ## Phase checklists
 
@@ -193,6 +196,28 @@ Nango refresh (`invalid_credentials`) asks to reconnect. 165 backend tests.
 - [ ] Live test of every workflow — uptime ✓ (deploy, run, delete), Medium ✓ (deploy, redeploy, run), Meegle digest ✓
       (deploy, run); Slack bot, second tester and short-TTL expiry still to do (`docs/go-live.md` §6)
 
+### Google through Nango (after P7)
+Notes: for opening to external users, no Google token or OAuth client leaves Nango (plan R15). `google.py` makes
+every backend Google call (create/check/rewrite the uptime sheet, delete it after a failed deploy, the account's
+email) through `NangoClient.proxy` as the user's connection, naming the Google host each time
+(`Base-Url-Override`); a refused refresh raises `GoogleConnectionExpired` ("reconnect"). The n8n workflows call
+the demo's **Google relay** (`/api/google-relay/…`, `services/google_relay.py`) with a per-deployment key
+(`relay_keys.py`: `<deployment id>.<random>` in an n8n Header Auth credential; refs keep only its SHA-256, so a
+redeploy or delete revokes it). The relay checks the key, that the deployment is active and unexpired, the
+workflow's `google_apis` (catalog: `sheets` for the uptime monitor — only its own spreadsheet's cells; `gmail_read`
+for the Medium digest), and passes on only known query parameters, then forwards to Nango's proxy. Templates: the
+uptime monitor's three Sheets nodes and the Medium digest's Gmail node become HTTP Request nodes + small Code
+nodes producing the same items as before (`catalog/fixes.py`); tests run that JavaScript and the HTTP nodes'
+expressions in Node (`tests/test_google_templates.py`, `n8n_js` fixture) and check the relay accepts the calls.
+`GOOGLE_CLIENT_ID/SECRET` and the refresh-token path are gone; `RELAY_BASE_URL` (default `PUBLIC_BASE_URL`;
+`http://demo:8000` on the server, and Caddy doesn't offer the relay publicly). Setup check: "Google relay"
+(the demo answers at that address) replaces "Google OAuth client". Failed runs show the API's explanation
+(n8n's error `description`). 187 backend tests.
+- [x] Nango proxy client; backend Google calls through it; no refresh token requested anywhere
+- [x] Google relay (key, live deployment, per-workflow allowlist, own spreadsheet only) + tests
+- [x] Uptime + Medium templates via the relay; JS/expression tests; catalog regenerated
+- [ ] Live: deploy with `RELAY_BASE_URL`, redeploy uptime + Medium, Run now each
+
 ## Decision log
 
 | Date | Decision |
@@ -206,6 +231,7 @@ Nango refresh (`invalid_credentials`) asks to reconnect. 165 backend tests.
 | 2026-10-04 | Hosting moved from Modal + Neon + n8n Cloud to **one AWS EC2 server** (owner's AWS credits): Docker Compose with self-hosted n8n, the reader, the bot and Postgres. |
 | 2026-10-04 | **Make Bridge discontinued** by Make: GitHub merge → Slack stays "Deploy unavailable" for now (option C): `DISABLED_WORKFLOWS=github-merge-slack` on the server shows the catalog's `unavailable_note` to testers. Alternatives on file: rebuild on n8n (recommended) or Make Core with HTTP modules. |
 | 2026-10-04 | Google OAuth client changed to **External + Testing** (testers span joinpond.ai and cryptopond.xyz; an Internal app covers one organization). Testers are added as test users in the Cloud console only — not in this public repo. A refused Nango refresh (`invalid_credentials`) now tells the tester to reconnect. |
+| 2026-10-06 | **Google only through Nango's proxy** (the demo will open to external clients; "Testing" isn't enough): the demo and n8n never hold Google tokens or the OAuth client, so the Nango `google` integration can later use a verified app of our own or Nango's developer app with no workflow change. n8n reaches Google through the demo's relay (per-deployment key, per-workflow allowlist); the Nango secret key never goes into n8n. |
 | 2026-10-04 | Meegle MCP token: per-user text box, encrypted in our DB. |
 | 2026-10-04 | Freedium kept for the Medium reader (owner's decision; risk noted in plan §14). |
 | 2026-10-04 | Limits: ≤10 users · uptime every 30 min · Medium ≤5 articles/run · deployments expire after 24 h. |
@@ -214,6 +240,7 @@ Nango refresh (`invalid_credentials`) asks to reconnect. 165 backend tests.
 | 2026-10-04 | Leaked Meegle token removed from git history (2 commits rewritten; `main` now at e7c40dc). Owner to revoke the token in Meegle. |
 
 ## Session log
+- 2026-10-06: Google through Nango: Nango proxy client, backend Google calls through it, the Google relay for n8n, uptime + Medium templates rewritten onto it (JS run in tests), settings/setup check/docs updated; 187 backend tests.
 - 2026-10-04: Tester bug (uptime): a site that doesn't answer (e.g. a timeout) made "Perform Site Test" throw, failing the run with no alert (also in the team's template). The check now continues on error with a 15 s timeout, no response counts as DOWN, and the log date falls back to the run time. Verified live; 170 backend tests.
 - 2026-10-04: Tester bug (uptime): changing "Websites to monitor" and redeploying kept the old sites — the redeploy reused the spreadsheet and ignored the list. Now the list is written into the Sites tab when it changed since it was last written (`sites_written` ref; older deployments rewrite once); unchanged lists keep edits made in the sheet. Verified live; 169 backend tests.
 - 2026-10-04: P7 live on AWS: provisioned the server, deployed the stack, set up Google/Slack/Nango/OpenAI, live-tested uptime, Medium and Meegle digest; fixed n8n delete (unpublish + retry) and the Medium empty-inbox path (165 backend tests).

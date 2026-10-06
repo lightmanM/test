@@ -33,10 +33,13 @@ try_it: |
 n8n:
   template: workflow.json
   values:
+    google_api: shared
     spreadsheet_id: deploy
     slack_channel: setting
   credentials:
-    google: {type: googleSheetsOAuth2Api, source: connection, ref: google}
+    # Google calls go through the demo's relay and Nango's proxy; n8n gets no Google token.
+    google: {type: httpHeaderAuth, source: google_relay, ref: google}
     slack: {type: slackApi, source: connection, ref: slack}
+  google_apis: [sheets]
   result_nodes:
     - Calculate Status

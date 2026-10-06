@@ -106,7 +106,7 @@ def test_connection_of_another_user_is_rejected(live):
 @respx.mock
 def test_google_connect_reads_email_and_reconnect_replaces_old(live):
     svc, client = live
-    respx.get("https://openidconnect.googleapis.com/v1/userinfo").mock(
+    userinfo = respx.get(f"{NANGO}/proxy/oauth2/v3/userinfo").mock(
         return_value=httpx.Response(200, json={"email": "alice@acme.dev"})
     )
     for cid in ("g-1", "g-2"):
@@ -118,6 +118,10 @@ def test_google_connect_reads_email_and_reconnect_replaces_old(live):
     )
     first = client.post("/api/connections/google/complete", json={"connection_id": "g-1"}).json()
     assert first["details"]["email"] == "alice@acme.dev"
+    # Read through Nango's proxy as the new connection: the demo never handles a Google token.
+    headers = userinfo.calls[0].request.headers
+    assert (headers["connection-id"], headers["provider-config-key"]) == ("g-1", "google")
+    assert headers["base-url-override"] == "https://www.googleapis.com"
     client.post("/api/connections/google/complete", json={"connection_id": "g-2"})
     assert deleted.called
     with svc.db.session() as db:
@@ -217,7 +221,7 @@ def test_revoked_connection_asks_to_reconnect(live):
     # Google ends sign-ins to an External "Testing" OAuth app after 7 days; Nango then answers
     # with `invalid_credentials` (status taken from the refresh error, 400 for Google).
     svc, client = live
-    respx.get("https://openidconnect.googleapis.com/v1/userinfo").mock(
+    respx.get(f"{NANGO}/proxy/oauth2/v3/userinfo").mock(
         return_value=httpx.Response(200, json={"email": "alice@acme.dev"})
     )
     route = respx.get(f"{NANGO}/connections/g-1").mock(
@@ -388,18 +392,20 @@ def test_user_credentials_for_deploy_jobs(live):
             },
         )
     )
-    respx.get("https://openidconnect.googleapis.com/v1/userinfo").mock(return_value=httpx.Response(401))
+    respx.get(f"{NANGO}/proxy/oauth2/v3/userinfo").mock(return_value=httpx.Response(401))
     client.post("/api/connections/google/complete", json={"connection_id": "g-1"})
     client.put("/api/connections/meegle_mcp_token/secret", json={"value": "m-AB-1234-abcd"})
     client.post("/api/connections/slack/fake")  # fake mode is on in this fixture
 
     with svc.db.session() as db:
         creds = UserCredentials(svc, db.query(User).one())
-        tokens = creds.oauth_tokens("google", with_refresh_token=True)
-        assert (tokens.access_token, tokens.refresh_token, tokens.scope) == ("ya29", "1//r", "sheets")
-        assert route.calls.last.request.url.params["refresh_token"] == "true"
-        assert creds.oauth_tokens("google").refresh_token is None
+        api = creds.google_api("google")  # Google calls go through Nango's proxy as this connection
+        assert (api.connection_id, api.integration) == ("g-1", "google")
+        tokens = creds.oauth_tokens("google")
+        assert (tokens.access_token, tokens.scope) == ("ya29", "sheets")
         assert "refresh_token" not in route.calls.last.request.url.params
+        with pytest.raises(AdapterError, match="demo data"):
+            creds.google_api("slack")
         assert creds.secret_value("meegle_mcp_token") == "m-AB-1234-abcd"
         with pytest.raises(AdapterError, match="demo data"):
             creds.oauth_tokens("slack")

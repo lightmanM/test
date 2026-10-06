@@ -20,6 +20,59 @@ def originals(load_json):
     return {t.workflow_id: load_json(t.fix_input) for t in targets()}
 
 
+# --------------------------------------------------------------------------- n8n JavaScript
+
+# Runs a Code node's JavaScript, or fills in a parameter's {{ expressions }}, roughly the way n8n
+# does: $input is the node's input items, $('Node') another node's output, $json the current item.
+N8N_JS_HARNESS = r"""
+const { mode, code, items, nodes } = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+const wrap = (list) => ({ all: () => list, first: () => list[0], item: list[0] });
+const $input = wrap(items);
+const $ = (name) => wrap(nodes[name] || []);
+const $json = items[0]?.json;
+let result;
+if (mode === 'code') {
+  result = new Function('$input', '$', code)($input, $);
+} else {
+  const evaluate = (expr) => new Function('$', '$json', `return (${expr});`)($, $json);
+  const text = code.replace(/^=/, '');
+  const whole = text.match(/^\{\{([\s\S]*)\}\}$/);
+  result = whole && !whole[1].includes('}}')
+    ? evaluate(whole[1])
+    : text.replace(/\{\{([\s\S]+?)\}\}/g, (_, expr) => String(evaluate(expr)));
+}
+process.stdout.write(JSON.stringify(result ?? null));
+"""
+
+
+@pytest.fixture
+def n8n_js():
+    """``n8n_js(code, items, nodes, mode="code"|"expression")``; skips if Node isn't installed."""
+    import os
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        if os.environ.get("CI"):
+            pytest.fail("node is needed in CI (actions/setup-node)")
+        pytest.skip("node is not installed")
+
+    def run(code, items=(), nodes=None, mode="code"):
+        payload = {"mode": mode, "code": code, "items": list(items), "nodes": nodes or {}}
+        done = subprocess.run(
+            [node, "-e", N8N_JS_HARNESS],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert done.returncode == 0, done.stderr
+        return json.loads(done.stdout)
+
+    return run
+
+
 # --------------------------------------------------------------------------- API fixtures
 
 

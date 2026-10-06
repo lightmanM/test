@@ -51,9 +51,9 @@ class Settings(BaseSettings):
     # n8n (uptime monitor, Meegle digest, Medium digest)
     n8n_base_url: str | None = None  # e.g. https://acme.app.n8n.cloud
     n8n_api_key: SecretStr | None = None
-    # The Internal Google OAuth client configured in Nango; n8n needs it to refresh Google tokens.
-    google_client_id: str | None = None
-    google_client_secret: SecretStr | None = None
+    # The demo's address as n8n reaches it, for the Google relay (n8n calls Google through the demo
+    # and Nango). Defaults to PUBLIC_BASE_URL; n8n on the same server can use the internal address.
+    relay_base_url: str | None = None
     # Owner-provided keys, given to each Medium digest deployment as its own n8n credentials.
     openai_api_key: SecretStr | None = None
     openai_base_url: str = "https://api.openai.com/v1"
@@ -80,6 +80,10 @@ class Settings(BaseSettings):
     @property
     def base_url(self) -> str:
         return self.public_base_url.rstrip("/")
+
+    @property
+    def relay_url(self) -> str:
+        return (self.relay_base_url or self.public_base_url).rstrip("/")
 
 
 @lru_cache(maxsize=1)

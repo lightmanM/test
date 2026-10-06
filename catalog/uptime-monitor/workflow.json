@@ -60,6 +60,12 @@
               "name": "DOWN_FROM_UP",
               "type": "boolean",
               "value": "={{ !($json.statusCode > 0 && $json.statusCode < 400) && $json.Status !== 'DOWN' }}"
+            },
+            {
+              "id": "row-number",
+              "name": "row_number",
+              "type": "number",
+              "value": "={{ $json.row_number }}"
             }
           ]
         },
@@ -75,32 +81,17 @@
       "typeVersion": 3.3
     },
     {
-      "parameters": {
-        "documentId": {
-          "__rl": true,
-          "mode": "id",
-          "value": "__VALUE:spreadsheet_id__"
-        },
-        "sheetName": {
-          "__rl": true,
-          "mode": "name",
-          "value": "Sites"
-        },
-        "options": {}
-      },
       "id": "50307dca-fa88-4a19-91a4-456866e529d4",
       "name": "Get Sites",
-      "type": "n8n-nodes-base.googleSheets",
       "position": [
-        1008,
+        1160,
         512
       ],
-      "typeVersion": 4.3,
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "slot:google",
-          "name": "google"
-        }
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// One item per site in the Sites tab (row 2 onwards), like the Google Sheets node made.\nconst rows = $input.first().json.values || [];\nreturn rows\n  .map((row, index) => ({\n    Property: String(row[0] ?? '').trim(),\n    Status: String(row[1] ?? '').trim(),\n    row_number: index + 2,\n  }))\n  .filter((site) => site.Property)\n  .map((site) => ({ json: site }));\n"
       }
     },
     {
@@ -132,163 +123,74 @@
       }
     },
     {
-      "parameters": {
-        "operation": "append",
-        "documentId": {
-          "__rl": true,
-          "mode": "id",
-          "value": "__VALUE:spreadsheet_id__"
-        },
-        "sheetName": {
-          "__rl": true,
-          "mode": "name",
-          "value": "Log"
-        },
-        "columns": {
-          "mappingMode": "autoMapInputData",
-          "value": {},
-          "matchingColumns": [],
-          "schema": [
-            {
-              "id": "date",
-              "displayName": "date",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "Property",
-              "displayName": "Property",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "UP_FROM_UP",
-              "displayName": "UP_FROM_UP",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "DOWN_FROM_DOWN",
-              "displayName": "DOWN_FROM_DOWN",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "UP_FROM_DOWN",
-              "displayName": "UP_FROM_DOWN",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "DOWN_FROM_UP",
-              "displayName": "DOWN_FROM_UP",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            }
-          ],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": false
-        },
-        "options": {}
-      },
       "id": "63343e68-be07-4d89-8363-140299dcf0b6",
       "name": "Log Uptime Event",
-      "type": "n8n-nodes-base.googleSheets",
       "position": [
         2640,
         608
       ],
-      "typeVersion": 4.3,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Spreadsheet').first().json.googleApi }}/sheets/v4/spreadsheets/{{ $('Spreadsheet').first().json.spreadsheetId }}/values/Log!A:F:append",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "valueInputOption",
+              "value": "RAW"
+            },
+            {
+              "name": "insertDataOption",
+              "value": "INSERT_ROWS"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ values: [[$json.date, $json.Property, $json.UP_FROM_UP, $json.DOWN_FROM_DOWN, $json.UP_FROM_DOWN, $json.DOWN_FROM_UP]] }) }}",
+        "options": {}
+      },
       "credentials": {
-        "googleSheetsOAuth2Api": {
+        "httpHeaderAuth": {
           "id": "slot:google",
           "name": "google"
         }
       }
     },
     {
-      "parameters": {
-        "operation": "appendOrUpdate",
-        "documentId": {
-          "__rl": true,
-          "mode": "id",
-          "value": "__VALUE:spreadsheet_id__"
-        },
-        "sheetName": {
-          "__rl": true,
-          "mode": "name",
-          "value": "Sites"
-        },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "Property": "={{ $('Calculate Status').item.json.Property }}",
-            "Status": "={{ ($('Calculate Status').item.json.DOWN_FROM_UP || $('Calculate Status').item.json.DOWN_FROM_DOWN) ? 'DOWN' : 'UP' }}"
-          },
-          "matchingColumns": [
-            "Property"
-          ],
-          "schema": [
-            {
-              "id": "Property",
-              "displayName": "Property",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "Status",
-              "displayName": "Status",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            }
-          ],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": false
-        },
-        "options": {}
-      },
       "id": "fe97a18b-902c-4fab-bf73-69b5b9e41a11",
       "name": "Update Site Status",
-      "type": "n8n-nodes-base.googleSheets",
       "position": [
         2800,
         608
       ],
-      "typeVersion": 4.3,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $('Spreadsheet').first().json.googleApi }}/sheets/v4/spreadsheets/{{ $('Spreadsheet').first().json.spreadsheetId }}/values/Sites!B{{ $('Calculate Status').item.json.row_number }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "valueInputOption",
+              "value": "RAW"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ values: [[($('Calculate Status').item.json.DOWN_FROM_UP || $('Calculate Status').item.json.DOWN_FROM_DOWN) ? 'DOWN' : 'UP']] }) }}",
+        "options": {}
+      },
       "credentials": {
-        "googleSheetsOAuth2Api": {
+        "httpHeaderAuth": {
           "id": "slot:google",
           "name": "google"
         }
@@ -539,6 +441,58 @@
       ],
       "id": "0d948a98-da1a-4912-b69e-24c9d31f66e8",
       "name": "Merge"
+    },
+    {
+      "id": "f1503043-2fee-55fb-85a6-84ea1b018435",
+      "name": "Spreadsheet",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        880,
+        512
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "google-api",
+              "name": "googleApi",
+              "type": "string",
+              "value": "__VALUE:google_api__"
+            },
+            {
+              "id": "spreadsheet-id",
+              "name": "spreadsheetId",
+              "type": "string",
+              "value": "__VALUE:spreadsheet_id__"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "57f20443-a7ca-507c-8165-0db6c75766fe",
+      "name": "Read Sites",
+      "position": [
+        1008,
+        512
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Spreadsheet').first().json.googleApi }}/sheets/v4/spreadsheets/{{ $('Spreadsheet').first().json.spreadsheetId }}/values/Sites!A2:B",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "slot:google",
+          "name": "google"
+        }
+      }
     }
   ],
   "connections": {
@@ -643,7 +597,7 @@
       "main": [
         [
           {
-            "node": "Get Sites",
+            "node": "Spreadsheet",
             "type": "main",
             "index": 0
           }
@@ -677,6 +631,28 @@
         [
           {
             "node": "Calculate Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spreadsheet": {
+      "main": [
+        [
+          {
+            "node": "Read Sites",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Sites": {
+      "main": [
+        [
+          {
+            "node": "Get Sites",
             "type": "main",
             "index": 0
           }

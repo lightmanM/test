@@ -78,10 +78,12 @@ Produces: `SLACK_BOT_TOKEN` (`xoxb-…`), `SLACK_APP_TOKEN` (`xapp-…`).
 
 ## 3. Google Cloud — External OAuth client in "Testing"
 
-Used by Nango for **Connect Google**, and by n8n to refresh Google tokens. The testers' accounts
-are on two Workspace domains, so the app is **External** (an Internal app covers one organization
-only) and stays in **Testing** (Gmail read is a restricted scope; verification isn't worth it for a
-demo).
+Used only by Nango, for **Connect Google**. Every Google call — the demo's own (create the uptime
+spreadsheet, read the account's email) and the n8n workflows' (through the demo's Google relay) — goes
+through Nango's proxy, which adds the user's token. So the client ID and secret are entered in Nango
+and nowhere else, and n8n never gets a Google token. The testers' accounts are on two Workspace
+domains, so the app is **External** (an Internal app covers one organization only) and stays in
+**Testing** for now (see "Opening to external users" below).
 
 1. <https://console.cloud.google.com> → create (or pick) a project. Any Google account can own it.
 2. **APIs & Services → Library**: enable *Google Sheets API*, *Google Drive API*, *Gmail API*.
@@ -94,7 +96,7 @@ demo).
 6. **Clients → Create client**: type **Web application**; authorized redirect URI
    `https://api.nango.dev/oauth/callback`.
 
-Produces: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`.
+Produces: the client ID and secret, for Nango (§4). The demo itself has no Google setting.
 
 What testers see and what to expect:
 - Only listed accounts can connect; anyone else gets "access denied". Add a new tester before
@@ -105,6 +107,23 @@ What testers see and what to expect:
 - A Workspace admin can block unverified apps from reading Gmail. Connect one tester first; if
   Google refuses, ask the admin to trust the client ID (Admin console → Security → API controls).
 
+### Opening to external users
+
+"Testing" stops at 100 hand-added accounts and 7-day sign-ins. Nothing in the workflows depends on
+which OAuth app Nango uses, so either path below is a change in Google Cloud and Nango only:
+
+- **Your own app, published and verified** (recommended by Nango, and the only option that shows
+  your name on Google's consent screen): set the audience to **In production** and submit for
+  verification. `spreadsheets` is a *sensitive* scope (brand verification, privacy policy, a video of
+  the flow); `gmail.readonly` is *restricted* (additionally a yearly third-party security assessment).
+  The uptime monitor only uses the spreadsheet the demo creates, which `drive.file` (not sensitive)
+  already covers — dropping `spreadsheets` leaves the Medium digest's Gmail read as the only scope that
+  needs review. Re-test the uptime monitor after changing scopes.
+- **Nango's own developer app** (if Nango offers one for Google on your plan): no Google review on your
+  side, but its scopes are fixed, users authorize "Nango", Google may revoke it at any time, and its
+  users can't be moved off Nango without reconnecting. Its tokens are only usable through Nango —
+  which is all the demo needs, since every Google call goes through Nango's proxy.
+
 ## 4. Nango
 
 1. Create an account at <https://app.nango.dev> (Pay-as-you-go plan for more than 10 connections).
@@ -112,7 +131,8 @@ What testers see and what to expect:
    - **Slack** — integration ID `slack`; client ID/secret from §1; scopes
      `chat:write,chat:write.public,channels:read`.
    - **Google** — integration ID `google`; client ID/secret from §3; scopes from §3.
-3. **Environment settings** → copy the secret key.
+3. **Environment settings** → copy the secret key. The demo calls Google through Nango's proxy, so a
+   scoped API key needs the `environment:proxy` scope (as well as connect sessions and connections).
 
 Produces: `NANGO_SECRET_KEY` (integration IDs default to `slack` and `google`).
 

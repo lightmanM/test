@@ -127,8 +127,20 @@ def validate_entry(catalog: Catalog, entry: WorkflowEntry, entry_dir: Path) -> N
         if used_slots != declared_slots:
             fail(f"template credential slots {sorted(used_slots)} != declared {sorted(declared_slots)}")
         for slot, credential in spec.credentials.items():
-            if credential.source is CredentialSource.CONNECTION and credential.ref not in connector_ids:
+            if (
+                credential.source in (CredentialSource.CONNECTION, CredentialSource.GOOGLE_RELAY)
+                and credential.ref not in connector_ids
+            ):
                 fail(f"credential slot {slot!r} uses connector {credential.ref!r} not listed in connectors")
+            if credential.source is CredentialSource.GOOGLE_RELAY:
+                if credential.type != "httpHeaderAuth":
+                    fail(f"credential slot {slot!r}: the Google relay key is an httpHeaderAuth credential")
+                if not spec.google_apis:
+                    fail(f"credential slot {slot!r} uses the Google relay but google_apis is empty")
+        if spec.google_apis and not any(
+            c.source is CredentialSource.GOOGLE_RELAY for c in spec.credentials.values()
+        ):
+            fail("google_apis is set but no credential slot uses the Google relay")
         leftovers = wj.real_credential_refs(template)
         if leftovers:
             fail(f"template references real credentials: {leftovers}")

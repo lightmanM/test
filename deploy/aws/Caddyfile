@@ -3,6 +3,10 @@
 
 {$DEMO_HOST} {
 	encode zstd gzip
+	# n8n reaches the demo's Google relay over the internal network (RELAY_BASE_URL=http://demo:8000),
+	# so it isn't offered on the public address at all (its keys would be refused anyway).
+	@relay path /api/google-relay /api/google-relay/*
+	respond @relay 404
 	reverse_proxy demo:8000
 }
 

@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any, Literal, Protocol
 
 from workflow_demo.catalog.models import Platform, WorkflowEntry
+from workflow_demo.google import GoogleApi
 
 
 class AdapterError(Exception):
@@ -25,16 +26,19 @@ class ConnectionInfo:
 @dataclass(frozen=True)
 class OAuthTokens:
     access_token: str
-    refresh_token: str | None = None
     scope: str | None = None
 
 
 class SecretReader(Protocol):
     """Reads the user's secrets on demand, only inside deploy jobs (never stored in refs)."""
 
-    def oauth_tokens(self, connector: str, *, with_refresh_token: bool = False) -> OAuthTokens: ...
+    def oauth_tokens(self, connector: str) -> OAuthTokens: ...
 
     def secret_value(self, connector: str) -> str: ...
+
+    def google_api(self, connector: str) -> GoogleApi:
+        """Calls Google as the user through Nango's proxy (no token leaves Nango)."""
+        ...
 
 
 @dataclass(frozen=True)

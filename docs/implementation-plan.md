@@ -26,7 +26,8 @@ owner's single account on each platform.
 | R11 | **Limits**: uptime checks every 30 min · Medium digest ≤ 5 articles per run. |
 | R12 | **Workflow fixes** applied: Make reacts only to merged PRs · Uptime status-update fixed and unconnected Gmail step removed · Meegle digest posts to Slack only when a webhook is set. |
 | R13 | **Freedium is kept** for Medium article fetching (owner's decision). |
-| R14 | **Google OAuth app is External, kept in "Testing"**: only the Google accounts on its test-user list (≤100, added one by one) can connect; sign-ins end after 7 days and the demo asks to reconnect. (Was "Internal"; the testers span two Workspace domains.) |
+| R14 | **Google OAuth app is External, kept in "Testing"**: only the Google accounts on its test-user list (≤100, added one by one) can connect; sign-ins end after 7 days and the demo asks to reconnect. (Was "Internal"; the testers span two Workspace domains.) Opening to external users means publishing a verified app (or Nango's developer app) — no workflow change, see R15. |
+| R15 | **Google only through Nango's proxy**: neither the demo nor n8n ever holds a Google token or OAuth client. n8n workflows call the demo's **Google relay** with a per-deployment key; the relay allows only that workflow's calls (Sheets cells of the deployment's own spreadsheet, or Gmail search/read) and forwards them to Nango's proxy as the tester's connection. |
 
 ---
 
@@ -66,11 +67,11 @@ a "Run now" trigger.
 - **What it does**: every 30 min, reads sites from a Google Sheet, checks each, logs results, alerts Slack when a site goes down / stays down / recovers.
 - **Connectors**: Google (Nango; Sheets) · Slack (Nango; bot token).
 - **User settings**: Slack channel (picker); sites to monitor (default: `https://example.com` and one always-failing URL so the alert path is visible).
-- **Template fixes**: remove unconnected Gmail node; rewrite "Update Site Status" to update the `Sites` tab row matched by `Property` with `Status = UP/DOWN`; loop processes one site at a time (the cross-join Merge paired every response with every site); blank Status treated as UP; alert text says DOWN / still DOWN / back UP; schedule 1 min → 30 min; Slack node auth → access token (`slackApi`); resource locators switched to ID mode (no Drive listing needed).
+- **Template fixes**: remove unconnected Gmail node; "Update Site Status" writes `Status = UP/DOWN` into the site's own row of the `Sites` tab; loop processes one site at a time (the cross-join Merge paired every response with every site); blank Status treated as UP; an unreachable site counts as DOWN; alert text says DOWN / still DOWN / back UP; schedule 1 min → 30 min; Slack node auth → access token (`slackApi`). The three Google Sheets nodes become HTTP Request nodes on the Sheets API through the Google relay (R15): "Spreadsheet" (Set: relay URL + sheet ID) → "Read Sites" (GET `Sites!A2:B`) → "Get Sites" (Code: one item per row with `row_number`, as the Sheets node made); "Log Uptime Event" appends to `Log!A:F`; "Update Site Status" PUTs `Sites!B<row>`.
 - **Deploy job**:
-  1. Get the user's Google token from Nango; create spreadsheet "Uptime monitor (demo)" in the user's Drive with tabs `Sites` (Property, Status), `Log` (date, Property, UP_FROM_UP, DOWN_FROM_DOWN, UP_FROM_DOWN, DOWN_FROM_UP) and seed the sites.
-  2. n8n credentials: `googleSheetsOAuth2Api` (our Google client ID/secret + Nango tokens — n8n refreshes Google tokens itself), `slackApi` (bot token), `httpHeaderAuth` for the Run-now webhook.
-  3. Transform (sheet ID/tab IDs, channel, credentials, webhook trigger) → `POST /workflows` → publish.
+  1. Through Nango's proxy as the user: create spreadsheet "Uptime monitor (demo)" in the user's Drive with tabs `Sites` (Property, Status), `Log` (date, Property, UP_FROM_UP, DOWN_FROM_DOWN, UP_FROM_DOWN, DOWN_FROM_UP) and seed the sites (a redeploy reuses it).
+  2. n8n credentials: `httpHeaderAuth` with the deployment's Google relay key (its SHA-256 goes into the refs), `slackApi` (bot token), `httpHeaderAuth` for the Run-now webhook.
+  3. Transform (relay URL, sheet ID, channel, credentials, webhook trigger) → `POST /workflows` → publish.
 - **Try it / results**: Run now → Slack alert for the failing site; rows appear in the sheet. Demo shows recent executions with per-site status (from "Calculate Status").
 - **Undeploy**: unpublish + delete workflow and its credentials. The sheet stays in the user's Drive.
 
@@ -90,8 +91,8 @@ a "Run now" trigger.
 - **Connectors**: Google (Nango; Gmail read-only) · Slack (Nango; bot token + channel).
 - **Shared (owner-provided)**: OpenAI-compatible API key → one shared n8n `openAiApi` credential; reader service URL + token → one shared n8n `httpHeaderAuth` credential.
 - **User settings**: Slack channel; (optional) model, default `gpt-4o-mini`.
-- **Template fixes**: cap to 5 newest articles (`.slice(0, 100)` → `.slice(0, 5)` in "Extract article links"); reader HTTP node sends `Authorization: Bearer <token>` via credential; shorter HTTP timeouts (reader 60 s, LLM 60 s). Typical runs take 1–3 min, but a worst case can exceed Starter's 5-min limit → Pro recommended. Run-now webhook added.
-- **Deploy job**: credentials (`gmailOAuth2`, `slackApi`; shared ones reused) → inject config (reader URL, channel, model) → create → publish.
+- **Template fixes**: cap to 5 newest articles (`.slice(0, 100)` → `.slice(0, 5)` in "Extract article links"); reader HTTP node sends `Authorization: Bearer <token>` via credential; shorter HTTP timeouts (reader 60 s, LLM 60 s). Typical runs take 1–3 min. Run-now webhook added. The Gmail node becomes calls through the Google relay (R15): "Search Gmail" (`q` = "Medium" + the 7-day window, newest 20) → "Found Gmail messages" (IF) → "Gmail message IDs" → "Read Gmail message" (`format=full`) → "Find Medium Daily Digest emails" (Code: shaped like the Gmail node's output; always outputs, so an empty inbox still gets the empty report; the reports count real messages only).
+- **Deploy job**: credentials (Google relay key, `slackApi`, OpenAI and reader keys) → inject config (relay URL, reader URL, channel, model) → create → publish.
 - **Try it / results**: Run now → weekly report in Slack (or an "empty report" if the inbox has no Medium mail); demo shows report text (output of "Build Medium weekly report").
 
 ### 3.4 `github-merge-slack` (Make, via Make Bridge) — from `GitHub 合并提交 Diff 通知前端.blueprint.json`
@@ -188,7 +189,9 @@ The owner's OpenAI key and the reader token are given to each Medium digest depl
 
 All adapters implement: `check_available()`, `deploy(ctx)`, `undeploy(ctx)`, `run_now(ctx)`, `recent_runs(ctx)`. A **fake adapter** set (`DEMO_FAKE_PLATFORMS=1`) makes the whole UI work without any credentials — used for development until real keys arrive and for E2E tests.
 
-**Nango**: connect sessions; verify connection tags; fetch fresh credentials (`GET /connections/{id}?provider_config_key=…`); Slack raw response for `authed_user.id`. Integrations: `slack` (scopes `chat:write chat:write.public channels:read`), `google` (scopes Sheets, Drive file, Gmail read-only, email).
+**Nango**: connect sessions; verify connection tags; fetch fresh credentials for Slack (`GET /connections/{id}?provider_config_key=…`, never the refresh token); Slack raw response for `authed_user.id`; **proxy** for every Google call (`/proxy/<path>` with `Connection-Id`, `Provider-Config-Key`, `Base-Url-Override` naming the Google host). Integrations: `slack` (scopes `chat:write chat:write.public channels:read`), `google` (scopes Sheets, Drive file, Gmail read-only, email).
+
+**Google relay** (`/api/google-relay/…`, `services/google_relay.py`): `Authorization: Bearer <deployment id>.<random>` (an n8n Header Auth credential per deployment; only its SHA-256 is stored) → the deployment must be active and unexpired → the call must be on the workflow's `google_apis` allowlist (`sheets`: GET/PUT `…/values/<A1 range>` and POST `…:append` on the deployment's spreadsheet; `gmail_read`: list and get `users/me/messages`), with only known query parameters → forwarded to Nango's proxy as the tester's current Google connection. Google's answer is passed back; a refused Nango refresh becomes 409 "reconnect". n8n on the same server uses the internal address (`RELAY_BASE_URL`); Caddy doesn't offer the relay publicly.
 
 **n8n** (`X-N8N-API-KEY`):
 - `GET /credentials/schema/{type}` at startup to validate payloads; `POST /credentials`; `DELETE /credentials/{id}`.
@@ -204,7 +207,7 @@ All adapters implement: `check_available()`, `deploy(ctx)`, `undeploy(ctx)`, `ru
 
 ## 9. Security
 
-- Slack/Google tokens live in Nango; the demo stores only connection IDs.
+- Slack/Google tokens live in Nango; the demo stores only connection IDs. Google tokens never leave Nango (R15): the demo and n8n reach Google through its proxy.
 - Manual secrets (Meegle) encrypted with AES-GCM (`DATA_ENCRYPTION_KEY`), decrypted only inside deploy jobs, never logged or sent to the browser.
 - Platform secrets in a Modal secret; nothing secret in git (`.env.example` only).
 - Secrets go into platform **credentials**, never into node parameters, so they don't appear in exported workflows or execution data.
@@ -246,7 +249,7 @@ demo-project/                     the team's originals (unchanged)
 | Demo | `DEMO_PASSCODE`, `ADMIN_PASSCODE`, `SESSION_SECRET`, `DATA_ENCRYPTION_KEY`, `PUBLIC_BASE_URL`, `MAX_USERS=10`, `DEPLOYMENT_TTL_HOURS=24` |
 | Database | `DATABASE_URL` (the Postgres container on the server) |
 | Nango | `NANGO_SECRET_KEY`, integration keys |
-| Google (External OAuth client, Testing) | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (also needed for n8n Google credentials) |
+| Google (External OAuth client, Testing) | client ID / secret (configured in Nango only); `RELAY_BASE_URL` — the demo as n8n reaches it (`http://demo:8000` on the server) |
 | Slack connect app | client ID / secret (configured in Nango) |
 | n8n | `N8N_BASE_URL` (`http://n8n:5678`, same server), `N8N_API_KEY` (created by `deploy/aws/setup_n8n.py`) |
 | Make | `MAKE_ZONE=us2.make.com`, `MAKE_TEAM_ID` (optional), `MAKE_BRIDGE_KEY_ID`, `MAKE_BRIDGE_SECRET`, `MAKE_BRIDGE_TEMPLATE_ID` (Bridge API only) |

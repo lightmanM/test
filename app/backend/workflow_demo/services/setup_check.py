@@ -18,8 +18,10 @@ from workflow_demo.adapters.base import AdapterError
 from workflow_demo.catalog.models import ConnectorKind, Platform
 from workflow_demo.n8n.client import N8nClient, N8nError
 from workflow_demo.nango import NangoError
+from workflow_demo.relay_keys import RELAY_PATH
 from workflow_demo.services import deployments as svc_deployments
 from workflow_demo.services.container import AppServices
+from workflow_demo.services.google_relay import INVALID_KEY
 
 State = Literal["ok", "missing", "error", "info"]
 TIMEOUT = 5
@@ -98,13 +100,25 @@ def run_checks(svc: AppServices) -> dict[str, Any]:
             return f"API key accepted by {s.n8n_base_url}"
 
         checks.append(_probe("n8n", n8n))
+
+        def relay() -> str:
+            # n8n calls Google at this address (Nango's proxy behind it). Without a key the relay
+            # answers 401 with its own error; anything else means the address is wrong or blocked.
+            url = f"{s.relay_url}{RELAY_PATH}/check"
+            resp = svc.http.get(url, timeout=TIMEOUT)
+            try:
+                message = resp.json()["error"]["message"]
+            except (ValueError, KeyError, TypeError):
+                message = None
+            if resp.status_code != 401 or message != INVALID_KEY:
+                raise RuntimeError(
+                    f"HTTP {resp.status_code} from {url}: not the demo's Google relay (RELAY_BASE_URL)"
+                )
+            return f"n8n calls Google through {s.relay_url}{RELAY_PATH} and Nango's proxy"
+
+        checks.append(_probe("Google relay", relay))
     else:
         checks.append(Check("n8n", "missing", "N8N_BASE_URL / N8N_API_KEY not set"))
-    checks.append(
-        Check("Google OAuth client", "ok", "set")
-        if s.google_client_id and s.google_client_secret
-        else Check("Google OAuth client", "missing", "GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set")
-    )
     if s.openai_api_key:
 
         def llm() -> str:
