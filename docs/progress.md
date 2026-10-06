@@ -24,7 +24,7 @@ Living document. Update at the end of every work session and every PR.
 | P5 Make Bridge | [#7](https://github.com/lightmanM/test/pull/7) | merged | Bridge adapter, popup + callback, unavailable state |
 | P6 Lifecycle & admin | [#8](https://github.com/lightmanM/test/pull/8) | merged | 24 h sweeper, redeploy/delete, admin page, setup check, E2E |
 | P7 Go live | [#9](https://github.com/lightmanM/test/pull/9) | packaging merged; live part waits on owner | Modal + Neon deploy, owner credentials, live checklist |
-| Google through Nango | [#15](https://github.com/lightmanM/test/pull/15) | in review | Google calls via Nango's proxy; n8n's via the demo's Google relay |
+| Google through Nango | [#15](https://github.com/lightmanM/test/pull/15) | merged; live rollout waits on owner | Google calls via Nango's proxy; n8n's via the demo's Google relay |
 
 ## Phase checklists
 
