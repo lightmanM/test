@@ -179,8 +179,12 @@ def delete_file(api: GoogleApi, file_id: str) -> None:
 
 
 def check_connection(api: GoogleApi) -> None:
-    """Raise ``GoogleConnectionExpired`` if Nango can no longer use the connection (one cheap call)."""
-    api.call("GET", "oauth2/v3/userinfo", base_url=GOOGLEAPIS)
+    """Reject an unusable Google connection before any n8n resources are created."""
+    resp = api.call("GET", "oauth2/v3/userinfo", base_url=GOOGLEAPIS)
+    if resp.status_code == 401:
+        raise GoogleConnectionExpired()
+    if resp.status_code >= 400:
+        raise GoogleError(f"Google connection check error {resp.status_code}: {_message(resp)}")
 
 
 def user_email(api: GoogleApi) -> str | None:
